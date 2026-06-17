@@ -1,0 +1,564 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useState, useMemo, useEffect } from "react";
+import {
+  Phone, MessageCircle, Calendar, Clock, Search,
+  CheckCheck, PhoneCall, PhoneMissed, PhoneOff,
+  Send, Bell, User, ChevronRight, X, Trash2,
+  PhoneIncoming, Filter, History, Sparkles,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+
+export const Route = createFileRoute("/telefonia")({ component: TelefoniaPage });
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+type TipoContato = "ligacao" | "whatsapp" | "confirmacao" | "lembrete" | "retorno";
+type StatusContato = "realizado" | "nao_atendeu" | "ocupado" | "cancelado" | "agendado";
+
+interface HistoricoContato {
+  id: string;
+  patientName: string;
+  phone: string;
+  tipo: TipoContato;
+  status: StatusContato;
+  notas: string;
+  data: string; // ISO
+  profissionalId?: string;
+  appointmentId?: string;
+  appointmentDate?: string;
+  appointmentStart?: string;
+}
+
+const HIST_KEY = "nexaclinic_telefonia_hist";
+
+function loadHist(): HistoricoContato[] {
+  try { return JSON.parse(localStorage.getItem(HIST_KEY) ?? "[]"); } catch { return []; }
+}
+function saveHist(h: HistoricoContato[]) {
+  localStorage.setItem(HIST_KEY, JSON.stringify(h));
+}
+function addHist(entry: Omit<HistoricoContato, "id" | "data">) {
+  const list = loadHist();
+  const novo: HistoricoContato = { ...entry, id: `tel_${Date.now()}`, data: new Date().toISOString() };
+  saveHist([novo, ...list]);
+  return novo;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatPhone(raw: string) {
+  const d = raw.replace(/\D/g, "");
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return raw;
+}
+function phoneDigits(raw: string) { return raw.replace(/\D/g, ""); }
+
+function whatsappURL(phone: string, msg: string) {
+  const d = phoneDigits(phone);
+  const num = d.startsWith("55") ? d : `55${d}`;
+  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+}
+
+function telURL(phone: string) {
+  return `tel:+55${phoneDigits(phone)}`;
+}
+
+// Templates de mensagem WhatsApp
+const TEMPLATES: Record<string, (nome: string, data?: string, hora?: string) => string> = {
+  confirmacao: (nome, data, hora) =>
+    `Olá ${nome}! 😊 Gostaríamos de confirmar sua consulta marcada para *${data ?? "breve"}* às *${hora ?? ""}*. Por favor, responda confirmando sua presença. Em caso de impossibilidade, nos avise com antecedência. Obrigado! 🏥`,
+  lembrete: (nome, data, hora) =>
+    `Olá ${nome}! 🔔 Lembramos que você tem uma consulta agendada para *${data ?? "breve"}* às *${hora ?? ""}*. Aguardamos sua presença! Qualquer dúvida, estamos à disposição. 😊`,
+  retorno: (nome) =>
+    `Olá ${nome}! 📋 Passamos para verificar como você está se sentindo após sua última consulta. Qualquer dúvida ou necessidade, estamos à disposição!`,
+  reagendamento: (nome) =>
+    `Olá ${nome}! 📅 Precisamos remarcar sua consulta. Por favor, entre em contato conosco para escolhermos um novo horário. Obrigado pela compreensão!`,
+  resultado: (nome) =>
+    `Olá ${nome}! 📋 Seus resultados de exame estão disponíveis. Entre em contato conosco para agendar uma consulta de retorno. Obrigado!`,
+};
+
+const tipoLabel: Record<TipoContato, string> = {
+  ligacao:     "Ligação",
+  whatsapp:    "WhatsApp",
+  confirmacao: "Confirmação",
+  lembrete:    "Lembrete",
+  retorno:     "Retorno",
+};
+const statusLabel: Record<StatusContato, string> = {
+  realizado:    "Realizado",
+  nao_atendeu:  "Não atendeu",
+  ocupado:      "Ocupado",
+  cancelado:    "Cancelado",
+  agendado:     "Agendado",
+};
+const statusColor: Record<StatusContato, string> = {
+  realizado:   "bg-emerald-100 text-emerald-700 border-emerald-200",
+  nao_atendeu: "bg-amber-100 text-amber-700 border-amber-200",
+  ocupado:     "bg-orange-100 text-orange-700 border-orange-200",
+  cancelado:   "bg-red-100 text-red-700 border-red-200",
+  agendado:    "bg-sky-100 text-sky-700 border-sky-200",
+};
+const tipoIcon: Record<TipoContato, React.ElementType> = {
+  ligacao:     PhoneCall,
+  whatsapp:    MessageCircle,
+  confirmacao: CheckCheck,
+  lembrete:    Bell,
+  retorno:     PhoneIncoming,
+};
+
+// ─── Componente principal ─────────────────────────────────────────────────────
+function TelefoniaPage() {
+  const [historico, setHistorico] = useState<HistoricoContato[]>(() => loadHist());
+  const [q, setQ] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState<TipoContato | "todos">("todos");
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelPaciente, setPanelPaciente] = useState<{ name: string; phone: string; appointmentId?: string; appointmentDate?: string; appointmentStart?: string } | null>(null);
+
+  // Carrega agendamentos do dia para ação rápida
+  const hoje = new Date().toISOString().split("T")[0];
+  const apts: any[] = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("nexaclinic_appointments_v3") ?? "[]")
+        .filter((a: any) => a.date === hoje && a.status !== "cancelado" && a.status !== "faltou")
+        .sort((a: any, b: any) => a.start.localeCompare(b.start));
+    } catch { return []; }
+  }, []);
+
+  const allProfessionals: any[] = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("nexaclinic_professionals") ?? "[]"); } catch { return []; }
+  }, []);
+
+  function refresh() { setHistorico(loadHist()); }
+
+  function registrar(
+    patientName: string, phone: string, tipo: TipoContato, status: StatusContato, notas = "",
+    appointmentId?: string, appointmentDate?: string, appointmentStart?: string
+  ) {
+    const entry = addHist({ patientName, phone, tipo, status, notas, appointmentId, appointmentDate, appointmentStart });
+    setHistorico((prev) => [entry, ...prev]);
+  }
+
+  function ligar(name: string, phone: string, aptId?: string, aptDate?: string, aptStart?: string) {
+    window.open(telURL(phone), "_self");
+    registrar(name, phone, "ligacao", "realizado", "", aptId, aptDate, aptStart);
+    toast.success(`Ligando para ${name}`, { description: formatPhone(phone) });
+  }
+
+  function whatsapp(name: string, phone: string, templateKey: string, aptDate?: string, aptStart?: string, aptId?: string) {
+    const msg = TEMPLATES[templateKey]?.(name, aptDate, aptStart) ?? `Olá ${name}!`;
+    window.open(whatsappURL(phone, msg), "_blank");
+    registrar(name, phone, templateKey === "confirmacao" ? "confirmacao" : templateKey === "lembrete" ? "lembrete" : "whatsapp", "realizado", `Template: ${templateKey}`, aptId, aptDate, aptStart);
+    toast.success(`WhatsApp aberto para ${name}`);
+  }
+
+  // Filtragem do histórico
+  const histFiltrado = useMemo(() => {
+    return historico.filter((h) => {
+      const matchQ = !q || h.patientName.toLowerCase().includes(q.toLowerCase()) || h.phone.includes(q);
+      const matchTipo = filtroTipo === "todos" || h.tipo === filtroTipo;
+      return matchQ && matchTipo;
+    });
+  }, [historico, q, filtroTipo]);
+
+  // Stats
+  const stats = useMemo(() => ({
+    hoje: historico.filter((h) => h.data.startsWith(hoje)).length,
+    confirmacoes: historico.filter((h) => h.tipo === "confirmacao" && h.data.startsWith(hoje)).length,
+    naoAtendeu: historico.filter((h) => h.status === "nao_atendeu" && h.data.startsWith(hoje)).length,
+    total: historico.length,
+  }), [historico, hoje]);
+
+  return (
+    <div className="space-y-5 -mt-4">
+
+      {/* ── Cabeçalho ──────────────────────────────────────────────── */}
+      <div
+        className="rounded-2xl border border-border/40 px-5 py-4"
+        style={{
+          background: "linear-gradient(135deg, hsl(var(--card)) 0%, hsl(210,40%,97%) 100%)",
+          boxShadow: "0 2px 16px rgba(0,0,0,0.06)",
+        }}
+      >
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
+              <Phone className="h-5 w-5 text-emerald-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "'Sora', system-ui", letterSpacing: "-0.02em" }}>
+                Telefonia
+              </h1>
+              <p className="text-xs text-muted-foreground mt-0.5">Contatos, confirmações e lembretes</p>
+            </div>
+          </div>
+
+          {/* Stats rápidos */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {[
+              { label: "Contatos hoje", value: stats.hoje, color: "text-sky-700 bg-sky-50 border-sky-200" },
+              { label: "Confirmações", value: stats.confirmacoes, color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+              { label: "Não atendeu", value: stats.naoAtendeu, color: "text-amber-700 bg-amber-50 border-amber-200" },
+            ].map((s) => (
+              <div key={s.label} className={`rounded-xl border px-3 py-1.5 text-center ${s.color}`}>
+                <p className="text-lg font-bold leading-none" style={{ fontFamily: "'Sora', system-ui" }}>{s.value}</p>
+                <p className="text-[10px] font-medium mt-0.5 whitespace-nowrap">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
+
+        {/* ── Coluna esquerda: agenda do dia ───────────────────────── */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-primary" />
+              Consultas de hoje
+              <span className="text-xs font-normal text-muted-foreground">
+                {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}
+              </span>
+            </h2>
+            <Badge variant="outline" className="text-xs">{apts.length} agendada{apts.length !== 1 ? "s" : ""}</Badge>
+          </div>
+
+          {apts.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 py-14 text-center rounded-2xl border border-dashed border-border">
+              <Calendar className="h-10 w-10 opacity-20" />
+              <p className="text-sm text-muted-foreground">Nenhuma consulta agendada para hoje</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {apts.map((apt: any) => {
+                const prof = allProfessionals.find((p: any) => p.id === apt.professionalId);
+                const confirmado = (apt as any).confirmadoPresenca;
+                const hasPhone = !!apt.phone?.trim();
+                return (
+                  <div
+                    key={apt.id}
+                    className="rounded-2xl border border-border bg-card p-4 shadow-sm hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {/* Horário */}
+                        <div
+                          className="flex h-10 w-14 shrink-0 flex-col items-center justify-center rounded-xl border text-center"
+                          style={{ borderColor: prof?.color ?? "#94a3b8", background: `${prof?.color ?? "#94a3b8"}15` }}
+                        >
+                          <span className="text-[11px] font-bold" style={{ color: prof?.color ?? "#64748b", fontFamily: "monospace" }}>
+                            {apt.start}
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-bold truncate">{apt.patientName}</p>
+                            {confirmado && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                <CheckCheck className="h-3 w-3" /> Confirmado
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {apt.procedure} · {prof?.name ?? "—"}
+                          </p>
+                          {apt.phone ? (
+                            <p className="text-xs text-sky-600 font-medium mt-0.5">{formatPhone(apt.phone)}</p>
+                          ) : (
+                            <p className="text-xs text-amber-600 mt-0.5">⚠ Sem telefone cadastrado</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Ações rápidas */}
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                        {/* Ligar */}
+                        <button
+                          disabled={!hasPhone}
+                          onClick={() => ligar(apt.patientName, apt.phone, apt.id, apt.date, apt.start)}
+                          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                            hasPhone
+                              ? "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                              : "border-border text-muted-foreground opacity-40 cursor-not-allowed"
+                          }`}
+                          title={hasPhone ? `Ligar para ${apt.patientName}` : "Sem telefone"}
+                        >
+                          <Phone className="h-3.5 w-3.5" /> Ligar
+                        </button>
+
+                        {/* WhatsApp — confirmar */}
+                        <button
+                          disabled={!hasPhone}
+                          onClick={() => whatsapp(apt.patientName, apt.phone, "confirmacao", apt.date, apt.start, apt.id)}
+                          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                            hasPhone
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border-border text-muted-foreground opacity-40 cursor-not-allowed"
+                          }`}
+                          title="Enviar confirmação via WhatsApp"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" /> Confirmar
+                        </button>
+
+                        {/* WhatsApp — lembrete */}
+                        <button
+                          disabled={!hasPhone}
+                          onClick={() => whatsapp(apt.patientName, apt.phone, "lembrete", apt.date, apt.start, apt.id)}
+                          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+                            hasPhone
+                              ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                              : "border-border text-muted-foreground opacity-40 cursor-not-allowed"
+                          }`}
+                          title="Enviar lembrete via WhatsApp"
+                        >
+                          <Bell className="h-3.5 w-3.5" /> Lembrete
+                        </button>
+
+                        {/* Mais opções */}
+                        {hasPhone && (
+                          <button
+                            onClick={() => {
+                              setPanelPaciente({ name: apt.patientName, phone: apt.phone, appointmentId: apt.id, appointmentDate: apt.date, appointmentStart: apt.start });
+                              setPanelOpen(true);
+                            }}
+                            className="flex items-center justify-center h-7 w-7 rounded-lg border border-border text-muted-foreground hover:bg-muted transition"
+                            title="Mais opções"
+                          >
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Coluna direita: histórico ────────────────────────────── */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" /> Histórico de contatos
+            </h2>
+            <span className="text-xs text-muted-foreground">{stats.total} registro{stats.total !== 1 ? "s" : ""}</span>
+          </div>
+
+          {/* Filtros */}
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar paciente ou telefone..." className="pl-9 h-9 text-sm" />
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {(["todos", "ligacao", "whatsapp", "confirmacao", "lembrete", "retorno"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setFiltroTipo(t)}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
+                    filtroTipo === t
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:border-primary/40"
+                  }`}
+                >
+                  {t === "todos" ? "Todos" : tipoLabel[t]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Lista do histórico */}
+          <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1">
+            {histFiltrado.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-12 text-center rounded-2xl border border-dashed border-border">
+                <History className="h-8 w-8 opacity-20" />
+                <p className="text-sm text-muted-foreground">Nenhum contato registrado</p>
+              </div>
+            ) : (
+              histFiltrado.map((h) => {
+                const Icon = tipoIcon[h.tipo];
+                return (
+                  <div key={h.id} className="rounded-xl border border-border bg-card px-3 py-2.5 flex items-start gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                      <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold truncate">{h.patientName}</p>
+                        <span className={`shrink-0 text-[10px] font-semibold rounded-full border px-2 py-0.5 ${statusColor[h.status]}`}>
+                          {statusLabel[h.status]}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">{formatPhone(h.phone)} · {tipoLabel[h.tipo]}</p>
+                      {h.notas && <p className="text-[10px] text-muted-foreground/70 italic mt-0.5 truncate">{h.notas}</p>}
+                      <p className="text-[10px] text-muted-foreground/50 mt-0.5">
+                        {new Date(h.data).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const list = loadHist().filter((x) => x.id !== h.id);
+                        saveHist(list);
+                        refresh();
+                        toast.success("Registro removido");
+                      }}
+                      className="shrink-0 opacity-30 hover:opacity-100 transition p-1 hover:text-destructive"
+                      title="Remover registro"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Painel de templates WhatsApp ─────────────────────────────── */}
+      {panelOpen && panelPaciente && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10">
+                  <MessageCircle className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold">{panelPaciente.name}</p>
+                  <p className="text-xs text-muted-foreground">{formatPhone(panelPaciente.phone)}</p>
+                </div>
+              </div>
+              <button onClick={() => setPanelOpen(false)} className="rounded-lg p-1.5 hover:bg-muted transition">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Ações */}
+            <div className="p-4 space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Ações rápidas</p>
+
+              {/* Ligar */}
+              <button
+                onClick={() => {
+                  ligar(panelPaciente.name, panelPaciente.phone, panelPaciente.appointmentId, panelPaciente.appointmentDate, panelPaciente.appointmentStart);
+                  setPanelOpen(false);
+                }}
+                className="w-full flex items-center gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100 transition"
+              >
+                <Phone className="h-4 w-4 shrink-0" />
+                <span>Ligar agora</span>
+                <span className="ml-auto text-xs font-normal text-sky-500">{formatPhone(panelPaciente.phone)}</span>
+              </button>
+
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mt-4 mb-2">Templates WhatsApp</p>
+
+              {Object.entries({
+                confirmacao:   { label: "Confirmação de consulta",  icon: CheckCheck,      color: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
+                lembrete:      { label: "Lembrete de consulta",     icon: Bell,            color: "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" },
+                retorno:       { label: "Verificação de retorno",   icon: PhoneIncoming,   color: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
+                reagendamento: { label: "Reagendamento",            icon: Calendar,        color: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+                resultado:     { label: "Resultado de exame",       icon: Sparkles,        color: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
+              }).map(([key, { label, icon: Icon, color }]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    whatsapp(panelPaciente.name, panelPaciente.phone, key, panelPaciente.appointmentDate, panelPaciente.appointmentStart, panelPaciente.appointmentId);
+                    setPanelOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition ${color}`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {label}
+                  <MessageCircle className="ml-auto h-3.5 w-3.5 opacity-50" />
+                </button>
+              ))}
+            </div>
+
+            {/* Registro manual */}
+            <ManualRegistroPanel
+              patientName={panelPaciente.name}
+              phone={panelPaciente.phone}
+              appointmentId={panelPaciente.appointmentId}
+              onSave={(tipo, status, notas) => {
+                registrar(panelPaciente.name, panelPaciente.phone, tipo, status, notas, panelPaciente.appointmentId, panelPaciente.appointmentDate, panelPaciente.appointmentStart);
+                setPanelOpen(false);
+                toast.success("Contato registrado no histórico");
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Subcomponente: registro manual ──────────────────────────────────────────
+function ManualRegistroPanel({ patientName, phone, appointmentId, onSave }: {
+  patientName: string;
+  phone: string;
+  appointmentId?: string;
+  onSave: (tipo: TipoContato, status: StatusContato, notas: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [tipo, setTipo] = useState<TipoContato>("ligacao");
+  const [status, setStatus] = useState<StatusContato>("realizado");
+  const [notas, setNotas] = useState("");
+
+  if (!open) {
+    return (
+      <div className="px-4 pb-4">
+        <button
+          onClick={() => setOpen(true)}
+          className="w-full rounded-xl border border-dashed border-border px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground transition"
+        >
+          + Registrar contato manualmente
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-border px-4 py-4 space-y-3">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Registrar contato</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Tipo</p>
+          <select
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value as TipoContato)}
+            className="w-full border border-input rounded-xl px-2.5 py-1.5 text-xs bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            {Object.entries(tipoLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as StatusContato)}
+            className="w-full border border-input rounded-xl px-2.5 py-1.5 text-xs bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          >
+            {Object.entries(statusLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+      </div>
+      <Input
+        value={notas}
+        onChange={(e) => setNotas(e.target.value)}
+        placeholder="Observações (opcional)..."
+        className="text-xs h-9"
+      />
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => onSave(tipo, status, notas)} className="flex-1 gap-1.5 bg-primary text-primary-foreground">
+          <Send className="h-3.5 w-3.5" /> Salvar registro
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+      </div>
+    </div>
+  );
+}

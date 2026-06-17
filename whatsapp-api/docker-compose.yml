@@ -1,0 +1,38 @@
+services:
+
+  mongodb:
+    image: mongo:7
+    container_name: evolution_mongo
+
+    restart: always
+
+    ports:
+      - "27017:27017"
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+
+  evolution_api:
+    image: atendai/evolution-api
+    container_name: evolution_api
+
+    restart: always
+
+    depends_on:
+      - mongodb
+
+    ports:
+      - "8081:8080"
+
+    environment:
+      - SERVER_TYPE=http
+      - SERVER_PORT=8080
+
+      - AUTHENTICATION_API_KEY=NEXACLINIC123
+
+      - DATABASE_PROVIDER=mongodb
+
+      - DATABASE_CONNECTION_URI=mongodb://admin:admin@mongodb:27017/?authSource=admin
+
+      - DATABASE_CONNECTION_DB_PREFIX_NAME=evolution

@@ -27,53 +27,50 @@ cadastroCompleto: row.cadastro_completo,
 }
 
 function mapToDb(data: any) {
-return {
-name: data.name,
-cpf: data.cpf,
-birth: data.birth,
-phone: data.phone,
-email: data.email,
-insurance: data.insurance,
-last_visit: data.lastVisit,
-status: data.status,
-rg: data.rg,
-sexo: data.sexo,
-estado_civil: data.estadoCivil,
-profissao: data.profissao,
-nacionalidade: data.nacionalidade,
-naturalidade: data.naturalidade,
-nome_mae: data.nomeMae,
-nome_pai: data.nomePai,
-responsavel: data.responsavel,
-telefone2: data.telefone2,
-cep: data.cep,
-endereco: data.endereco,
-numero: data.numero,
-complemento: data.complemento,
-bairro: data.bairro,
-cidade: data.cidade,
-estado: data.estado,
-convenio_numero: data.convenioNumero,
-convenio_validade: data.convenioValidade,
-alergias: data.alergias,
-medicamentos: data.medicamentos,
-doencas: data.doencas,
-cirurgias: data.cirurgias,
-historia_familiar: data.historiaFamiliar,
-tipo_sanguineo: data.tipoSanguineo,
-observacoes: data.observacoes,
-contato_emergencia_nome: data.contatoEmergenciaNome,
-contato_emergencia_telefone:
-  data.contatoEmergenciaTelefone,
-contato_emergencia_parentesco:
-  data.contatoEmergenciaParentesco,
-cadastro_completo:
-  data.cadastroCompleto ?? false,
-```
-
-};
+  return {
+    name: data.name,
+    cpf: data.cpf,
+    birth: data.birth,
+    phone: data.phone,
+    email: data.email,
+    insurance: data.insurance,
+    last_visit: data.lastVisit,
+    status: data.status,
+    rg: data.rg,
+    sexo: data.sexo,
+    estado_civil: data.estadoCivil,
+    profissao: data.profissao,
+    nacionalidade: data.nacionalidade,
+    naturalidade: data.naturalidade,
+    nome_mae: data.nomeMae,
+    nome_pai: data.nomePai,
+    responsavel: data.responsavel,
+    telefone2: data.telefone2,
+    cep: data.cep,
+    endereco: data.endereco,
+    numero: data.numero,
+    complemento: data.complemento,
+    bairro: data.bairro,
+    cidade: data.cidade,
+    estado: data.estado,
+    convenio_numero: data.convenioNumero,
+    convenio_validade: data.convenioValidade,
+    alergias: data.alergias,
+    medicamentos: data.medicamentos,
+    doencas: data.doencas,
+    cirurgias: data.cirurgias,
+    historia_familiar: data.historiaFamiliar,
+    tipo_sanguineo: data.tipoSanguineo,
+    observacoes: data.observacoes,
+    contato_emergencia_nome: data.contatoEmergenciaNome,
+    contato_emergencia_telefone:
+      data.contatoEmergenciaTelefone,
+    contato_emergencia_parentesco:
+      data.contatoEmergenciaParentesco,
+    cadastro_completo:
+      data.cadastroCompleto ?? false,
+  };
 }
-
 export const patientStore = {
 async getAll(): Promise<Patient[]> {
 const { data, error } = await supabase

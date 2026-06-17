@@ -36,8 +36,6 @@ email: data.email,
 insurance: data.insurance,
 last_visit: data.lastVisit,
 status: data.status,
-
-```
 rg: data.rg,
 sexo: data.sexo,
 estado_civil: data.estadoCivil,

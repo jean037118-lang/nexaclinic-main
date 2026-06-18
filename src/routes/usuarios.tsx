@@ -95,8 +95,15 @@ function UsuariosPage() {
   const [form, setForm] = useState<FormData>(FORM_VAZIO);
   const [salvando, setSalvando] = useState(false);
 
-  function recarregar() {
-    setUsuarios(listarUsuarios());
+  async function recarregar() {
+    try {
+      const lista = await listarUsuarios();
+      setUsuarios(Array.isArray(lista) ? lista : []);
+    } catch (err) {
+      console.error("Erro ao listar usuários:", err);
+      toast.error("Não foi possível carregar a lista de usuários.");
+      setUsuarios([]);
+    }
     setProfissionais(getProfissionais());
   }
 
@@ -130,14 +137,14 @@ function UsuariosPage() {
       if (editando) {
         const dados: Partial<AppUser> = { nome: form.nome, email: form.email, role: form.role, ativo: form.ativo, professionalId: form.professionalId || undefined, maxDesconto: form.maxDesconto ?? 0 };
         if (form.senha) dados.senha = form.senha;
-        atualizarUsuario(editando.id, dados);
+        await atualizarUsuario(editando.id, dados);
         toast.success("Usuário atualizado com sucesso.");
       } else {
-        criarUsuario({ nome: form.nome, email: form.email, senha: form.senha, role: form.role, ativo: form.ativo, professionalId: form.professionalId || undefined, maxDesconto: form.maxDesconto ?? 0 });
+        await criarUsuario({ nome: form.nome, email: form.email, senha: form.senha, role: form.role, ativo: form.ativo, professionalId: form.professionalId || undefined, maxDesconto: form.maxDesconto ?? 0 });
         toast.success("Usuário criado com sucesso.");
       }
       setModalAberto(false);
-      recarregar();
+      await recarregar();
     } catch (err: any) {
       toast.error(err.message ?? "Erro ao salvar.");
     } finally {
@@ -145,13 +152,13 @@ function UsuariosPage() {
     }
   }
 
-  function confirmarExcluir() {
+  async function confirmarExcluir() {
     if (!excluindo) return;
     try {
-      excluirUsuario(excluindo.id);
+      await excluirUsuario(excluindo.id);
       toast.success("Usuário removido.");
       setExcluindo(null);
-      recarregar();
+      await recarregar();
     } catch (err: any) {
       toast.error(err.message ?? "Erro ao excluir.");
     }

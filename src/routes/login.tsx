@@ -82,7 +82,7 @@ function LoginPage() {
 
     await new Promise((r) => setTimeout(r, 350));
 
-    const user = login(email.trim(), senha);
+    const user = await login(email.trim(), senha);
     setLoading(false);
 
     if (user) {

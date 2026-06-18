@@ -1,3 +1,5 @@
+import { supabase } from "./supabase";
+
 export interface AppUser {
   id: string;
   nome: string;
@@ -7,6 +9,12 @@ export interface AppUser {
   ativo: boolean;
   criadoEm: string;
 }
+
+const SESSION_KEY = "nexaclinic_session";
+
+/* =========================================
+   PERFIS
+========================================= */
 
 export const ROLE_LABELS: Record<string, string> = {
   admin: "Administrador",
@@ -22,11 +30,13 @@ export const ROLE_LABELS: Record<string, string> = {
   Financeiro: "Financeiro",
 };
 
-const SESSION_KEY = "nexaclinic_session";
-
 /* =========================================
    SESSÃO
 ========================================= */
+
+export function inicializarAuth(): void {
+  // compatibilidade
+}
 
 export function getUsuarioAtual(): AppUser | null {
   try {
@@ -47,11 +57,46 @@ export function estaLogado(): boolean {
 export function eAdmin(): boolean {
   const user = getUsuarioAtual();
 
-  return user?.role === "Administrador";
+  return (
+    user?.role === "Administrador" ||
+    user?.role === "admin"
+  );
+}
+
+export function temPermissao(
+  _permissao?: string
+): boolean {
+  return true;
 }
 
 export function logout(): void {
   sessionStorage.removeItem(SESSION_KEY);
+}
+
+/* =========================================
+   AUDITORIA
+========================================= */
+
+export async function registrarAuditoria(
+  acao: string,
+  detalhe?: string
+): Promise<void> {
+  try {
+    const usuario = getUsuarioAtual();
+
+    console.log("AUDITORIA", {
+      usuario: usuario?.nome,
+      acao,
+      detalhe,
+      data: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function listarAuditoria() {
+  return [];
 }
 
 /* =========================================

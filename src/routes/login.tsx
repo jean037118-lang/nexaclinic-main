@@ -84,14 +84,23 @@ function LoginPage() {
 
     const user = await login(email.trim(), senha);
     setLoading(false);
+if (user) {
+  const primeiroNome =
+    user.nome?.split(" ")[0] ||
+    user.email?.split("@")[0] ||
+    "Usuário";
 
-    if (user) {
-      toast.success("Bem-vindo, " + user.nome.split(" ")[0] + "!");
-      router.navigate({ to: "/", replace: true });
-    } else {
-      toast.error("E-mail ou senha incorretos.");
-    }
-  }
+  toast.success(`Bem-vindo, ${primeiroNome}!`);
+
+  router.navigate({
+    to: "/",
+    replace: true,
+  });
+} else {
+  toast.error("E-mail ou senha incorretos.");
+}
+
+ 
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900">

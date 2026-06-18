@@ -100,7 +100,8 @@ if (user) {
   toast.error("E-mail ou senha incorretos.");
 }
 
- 
+ }
+
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-950 via-teal-950 to-slate-900">

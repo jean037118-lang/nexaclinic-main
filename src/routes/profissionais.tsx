@@ -151,6 +151,24 @@ function AvatarUpload({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Imagem muito grande. Máximo de 5 MB.");
+      e.target.value = "";
+      return;
+    }
+
+    try {
+      const base64 = await fileToBase64(file);
+      const resized = await resizeImage(base64);
+      onChange(resized);
+    } catch {
+      toast.error("Não foi possível carregar a imagem.");
+    }
+
     // limpa o input para permitir reselecionar o mesmo arquivo
     e.target.value = "";
   }

@@ -497,6 +497,7 @@ function AgendaPage() {
   }
 
   const appointmentsPrevRef = useRef<AppointmentExt[] | null>(null);
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   useEffect(() => {
     saveAppointments(appointments); // cache local (usado por outras telas/relatórios)
 
@@ -508,6 +509,11 @@ function AgendaPage() {
     const currIds = new Set(appointments.map((a) => a.id));
 
     appointments.forEach((apt) => {
+      if (!UUID_RE.test(apt.id)) {
+        // Agendamento antigo (criado antes da migração) com id em formato
+        // incompatível com o Supabase — ignorado na sincronização.
+        return;
+      }
       const before = prevById.get(apt.id);
       if (!before) {
         criarAgendamento(apt).catch((e) => console.error("Falha ao criar agendamento no Supabase:", e));
@@ -517,7 +523,7 @@ function AgendaPage() {
     });
 
     prev.forEach((before) => {
-      if (!currIds.has(before.id)) {
+      if (UUID_RE.test(before.id) && !currIds.has(before.id)) {
         excluirAgendamento(before.id).catch((e) => console.error("Falha ao excluir agendamento no Supabase:", e));
       }
     });
@@ -958,7 +964,7 @@ function AgendaPage() {
     );
     if (exists) { toast.error("Horário já ocupado para este profissional"); return; }
 
-    const id = `a${Date.now()}`;
+    const id = crypto.randomUUID();
     const cpfValue: string = ((data as any).cpf ?? "").replace(/\D/g, "");
     const novo: AppointmentExt = { ...data, id, status: "agendado", cpf: cpfValue };
     setAppointments((prev) => [...prev, novo]);

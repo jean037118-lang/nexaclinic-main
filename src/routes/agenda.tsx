@@ -413,11 +413,18 @@ function AgendaPage() {
   const [filterProfSearch, setFilterProfSearch] = useState<string>("");
   const [currentDate, setCurrentDate] = useState<Date>(() => startOfDay(new Date()));
   const [appointments, setAppointments] = useState<AppointmentExt[]>(() => loadAppointments());
+  const appointmentsPrevRef = useRef<AppointmentExt[] | null>(null);
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   useEffect(() => {
     let ativo = true;
     listarAgendamentos().then((lista: AppointmentExt[]) => {
       if (!ativo) return;
+      // Marca esta carga como "vinda do servidor": sincroniza a referência junto
+      // com o estado para que o efeito de diff abaixo não interprete agendamentos
+      // ainda não sincronizados (ou momentaneamente fora da resposta) como
+      // exclusões e não tente apagá-los do Supabase.
+      appointmentsPrevRef.current = lista;
       setAppointments(lista);
       try { saveAppointments(lista); } catch { /* ignora erro de cache */ }
     });
@@ -496,8 +503,6 @@ function AgendaPage() {
     setCadastroOpen(false);
   }
 
-  const appointmentsPrevRef = useRef<AppointmentExt[] | null>(null);
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   useEffect(() => {
     saveAppointments(appointments); // cache local (usado por outras telas/relatórios)
 

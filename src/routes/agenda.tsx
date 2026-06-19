@@ -2,6 +2,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { billingStorage } from "@/lib/billing-storage";
 import { eAdmin, registrarAuditoria } from "@/lib/auth";
+import {
+  listarProfissionais,
+  listarAgendamentos,
+  criarAgendamento,
+  atualizarAgendamento,
+  excluirAgendamento,
+} from "@/lib/agendaData";
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { patientStore } from "@/lib/patient-store";
 import { sendConfirmacaoAgendamento, runDailyReminders } from "@/lib/whatsapp";
@@ -374,13 +381,28 @@ function useProcedureValue(procedureName: string, insurance: string, professiona
 function AgendaPage() {
   const [view, setView] = useState<"day" | "week" | "month">("day");
 
-  // Carrega profissionais do localStorage (com scheduleStart/scheduleEnd)
+  // Carrega profissionais do Supabase (com fallback para o cache local
+  // enquanto a busca não termina, para evitar tela vazia no primeiro render)
   const [allProfessionals, setAllProfessionals] = useState(() => {
     try {
       const saved = localStorage.getItem("nexaclinic_professionals");
       return saved ? JSON.parse(saved) : professionals;
     } catch { return professionals; }
   });
+
+  useEffect(() => {
+    let ativo = true;
+    listarProfissionais().then((lista) => {
+      if (!ativo) return;
+      if (lista && lista.length > 0) {
+        setAllProfessionals(lista);
+        try {
+          localStorage.setItem("nexaclinic_professionals", JSON.stringify(lista));
+        } catch { /* ignora erro de cache */ }
+      }
+    });
+    return () => { ativo = false; };
+  }, []);
 
   const [profIds, setProfIds] = useState<string[]>(
     allProfessionals.filter((p: any) => p.active).map((p: any) => p.id)
@@ -391,6 +413,16 @@ function AgendaPage() {
   const [filterProfSearch, setFilterProfSearch] = useState<string>("");
   const [currentDate, setCurrentDate] = useState<Date>(() => startOfDay(new Date()));
   const [appointments, setAppointments] = useState<AppointmentExt[]>(() => loadAppointments());
+
+  useEffect(() => {
+    let ativo = true;
+    listarAgendamentos().then((lista: AppointmentExt[]) => {
+      if (!ativo) return;
+      setAppointments(lista);
+      try { saveAppointments(lista); } catch { /* ignora erro de cache */ }
+    });
+    return () => { ativo = false; };
+  }, []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -464,7 +496,32 @@ function AgendaPage() {
     setCadastroOpen(false);
   }
 
-  useEffect(() => { saveAppointments(appointments); }, [appointments]);
+  const appointmentsPrevRef = useRef<AppointmentExt[] | null>(null);
+  useEffect(() => {
+    saveAppointments(appointments); // cache local (usado por outras telas/relatórios)
+
+    const prev = appointmentsPrevRef.current;
+    appointmentsPrevRef.current = appointments;
+    if (prev === null) return; // primeira carga: não há o que sincronizar ainda
+
+    const prevById = new Map(prev.map((a) => [a.id, a]));
+    const currIds = new Set(appointments.map((a) => a.id));
+
+    appointments.forEach((apt) => {
+      const before = prevById.get(apt.id);
+      if (!before) {
+        criarAgendamento(apt).catch((e) => console.error("Falha ao criar agendamento no Supabase:", e));
+      } else if (JSON.stringify(before) !== JSON.stringify(apt)) {
+        atualizarAgendamento(apt.id, apt).catch((e) => console.error("Falha ao atualizar agendamento no Supabase:", e));
+      }
+    });
+
+    prev.forEach((before) => {
+      if (!currIds.has(before.id)) {
+        excluirAgendamento(before.id).catch((e) => console.error("Falha ao excluir agendamento no Supabase:", e));
+      }
+    });
+  }, [appointments]);
   useEffect(() => { saveWaitlist(waitlist); }, [waitlist]);
   useEffect(() => { saveBlocks(blocks); }, [blocks]);
 

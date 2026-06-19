@@ -84,12 +84,14 @@ export async function registrarAuditoria(
   try {
     const usuario = getUsuarioAtual();
 
-    console.log("AUDITORIA", {
-      usuario: usuario?.nome,
-      acao,
-      detalhe,
-      data: new Date().toISOString(),
-    });
+    if (import.meta.env.DEV) {
+      console.log("AUDITORIA", {
+        usuario: usuario?.nome,
+        acao,
+        detalhe,
+        data: new Date().toISOString(),
+      });
+    }
   } catch (err) {
     console.error(err);
   }

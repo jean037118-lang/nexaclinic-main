@@ -151,82 +151,6 @@ function AvatarUpload({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function handleSubmit() {
-  if (!form.name.trim()) {
-    toast.error("Informe o nome");
-    return;
-  }
-
-  if (form.tipo === "profissional") {
-    if (!form.specialty.trim()) {
-      toast.error("Informe a especialidade");
-      return;
-    }
-
-    if (!form.crm.trim()) {
-      toast.error("Informe o CRM");
-      return;
-    }
-  }
-
-  const nomeLower = form.name.trim().toLowerCase();
-
-  const duplicado = professionals.find(
-    (p: any) =>
-      p.name.toLowerCase() === nomeLower &&
-      p.id !== editingId
-  );
-
-  if (duplicado) {
-    toast.error(
-      `Já existe um profissional com o nome "${form.name.trim()}".`
-    );
-    return;
-  }
-
-  try {
-    if (editingId) {
-      await atualizarProfissional(editingId, form);
-
-      setProfessionals((prev) =>
-        prev.map((p) =>
-          p.id === editingId ? { ...p, ...form } : p
-        )
-      );
-
-      registrarAuditoria(
-        "EDITAR_PROFISSIONAL",
-        `Profissional/sala "${form.name}" atualizado`
-      );
-
-      toast.success(
-        form.tipo === "exame"
-          ? "Sala de exame atualizada"
-          : "Profissional atualizado"
-      );
-    } else {
-      const novo = await criarProfissional(form);
-
-      setProfessionals((prev) => [...prev, novo]);
-
-      registrarAuditoria(
-        "CRIAR_PROFISSIONAL",
-        `Profissional/sala "${form.name}" cadastrado`
-      );
-
-      toast.success(
-        form.tipo === "exame"
-          ? "Sala de exame cadastrada"
-          : "Profissional cadastrado"
-      );
-    }
-
-    setFormOpen(false);
-  } catch (error) {
-    console.error(error);
-    toast.error("Erro ao salvar profissional");
-  }
-}
     // limpa o input para permitir reselecionar o mesmo arquivo
     e.target.value = "";
   }
@@ -360,7 +284,7 @@ function ProfissionaisPage() {
     setFormOpen(true);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!form.name.trim()) { toast.error("Informe o nome"); return; }
     if (form.tipo === "profissional") {
       if (!form.specialty.trim()) { toast.error("Informe a especialidade"); return; }
@@ -373,17 +297,25 @@ function ProfissionaisPage() {
     );
     if (duplicado) { toast.error(`Já existe um profissional com o nome "${form.name.trim()}".`); return; }
 
-    if (editingId) {
-      persist(professionals.map((p) => p.id === editingId ? { ...p, ...form } : p));
-      toast.success(form.tipo === "exame" ? "Sala de exame atualizada" : "Profissional atualizado");
-      registrarAuditoria("EDITAR_PROFISSIONAL", `Profissional/sala "${form.name}" atualizado`);
-    } else {
-      const novo: Professional = { ...form, id: `prof_${Date.now()}` };
-      persist([...professionals, novo]);
-      toast.success(form.tipo === "exame" ? "Sala de exame cadastrada" : "Profissional cadastrado");
-      registrarAuditoria("CRIAR_PROFISSIONAL", `Profissional/sala "${form.name}" cadastrado`);
+    try {
+      if (editingId) {
+        await atualizarProfissional(editingId, form);
+        setProfessionals((prev) =>
+          prev.map((p) => (p.id === editingId ? { ...p, ...form } : p))
+        );
+        toast.success(form.tipo === "exame" ? "Sala de exame atualizada" : "Profissional atualizado");
+        registrarAuditoria("EDITAR_PROFISSIONAL", `Profissional/sala "${form.name}" atualizado`);
+      } else {
+        const novo = await criarProfissional(form);
+        setProfessionals((prev) => [...prev, novo as Professional]);
+        toast.success(form.tipo === "exame" ? "Sala de exame cadastrada" : "Profissional cadastrado");
+        registrarAuditoria("CRIAR_PROFISSIONAL", `Profissional/sala "${form.name}" cadastrado`);
+      }
+      setFormOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao salvar profissional");
     }
-    setFormOpen(false);
   }
 
   async function handleDelete() {

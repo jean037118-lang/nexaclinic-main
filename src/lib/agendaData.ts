@@ -186,3 +186,87 @@ export async function excluirAgendamento(id: string) {
     throw error;
   }
 }
+
+/* =========================================
+   CONVÊNIOS
+========================================= */
+
+function mapConvFromDb(row: any) {
+  return {
+    id: row.id,
+    name: row.name,
+    ansCode: row.ans_code ?? "",
+    type: row.tipo ?? "Médico",
+    repasse: row.repasse ?? "",
+    carencia: row.carencia ?? "",
+    contact: row.contact ?? "",
+    status: row.status ?? "ativo",
+    faturar: row.faturar ?? false,
+    repasseAoFaturar: row.repasse_ao_faturar ?? false,
+    planos: row.planos ?? [],
+    tabelas: row.tabelas ?? [],
+  };
+}
+
+function mapConvToDb(c: any) {
+  return {
+    name: c.name,
+    tipo: c.type,
+    ans_code: c.ansCode,
+    contact: c.contact,
+    status: c.status,
+    repasse: c.repasse,
+    carencia: c.carencia,
+    faturar: c.faturar ?? false,
+    repasse_ao_faturar: c.repasseAoFaturar ?? false,
+    planos: c.planos ?? [],
+    tabelas: c.tabelas ?? [],
+  };
+}
+
+export async function listarConvenios() {
+  const { data, error } = await supabase
+    .from("convenios")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    console.error("Erro ao listar convênios:", error);
+    return [];
+  }
+  return (data || []).map(mapConvFromDb);
+}
+
+export async function criarConvenio(conv: any) {
+  const { data, error } = await supabase
+    .from("convenios")
+    .insert(mapConvToDb(conv))
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Erro ao criar convênio:", error);
+    throw error;
+  }
+  return mapConvFromDb(data);
+}
+
+export async function atualizarConvenio(id: string, conv: any) {
+  const { error } = await supabase
+    .from("convenios")
+    .update(mapConvToDb(conv))
+    .eq("id", id);
+
+  if (error) {
+    console.error("Erro ao atualizar convênio:", error);
+    throw error;
+  }
+}
+
+export async function excluirConvenio(id: string) {
+  const { error } = await supabase.from("convenios").delete().eq("id", id);
+  if (error) {
+    console.error("Erro ao excluir convênio:", error);
+    throw error;
+  }
+}

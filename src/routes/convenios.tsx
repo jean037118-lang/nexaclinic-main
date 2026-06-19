@@ -1,6 +1,12 @@
 'use client';
 import { createFileRoute } from "@tanstack/react-router";
 import { eAdmin, registrarAuditoria } from "@/lib/auth";
+import {
+  listarConvenios,
+  criarConvenio,
+  atualizarConvenio,
+  excluirConvenio,
+} from "@/lib/agendaData";
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
 import {
@@ -162,12 +168,28 @@ const CATEGORIAS   = ["Consulta", "Exame", "Cirurgia", "Terapia", "Procedimento"
 type View = "lista" | "detalhe" | "tabela";
 
 function ConveniosPage() {
-  const [convenios, setConvenios] = useState<Convenio[]>(() => readConvenios());
+  const [convenios, setConvenios] = useState<Convenio[]>([]);
+  const [loading, setLoading]     = useState(true);
   const [view, setView]           = useState<View>("lista");
   const [convenioId, setConvenioId] = useState<string | null>(null);
   const [tabelaId, setTabelaId]     = useState<string | null>(null);
 
-  function persist(list: Convenio[]) { saveConvenios(list); setConvenios(list); }
+  useEffect(() => {
+    async function carregar() {
+      try {
+        const lista = await listarConvenios();
+        setConvenios(lista as Convenio[]);
+      } catch (err) {
+        console.error(err);
+        toast.error("Erro ao carregar convênios");
+      } finally {
+        setLoading(false);
+      }
+    }
+    carregar();
+  }, []);
+
+  function persist(list: Convenio[]) { setConvenios(list); }
 
   function abrirDetalhe(id: string) { setConvenioId(id); setView("detalhe"); }
   function abrirTabela(convId: string, tabId: string) {
@@ -194,7 +216,13 @@ function ConveniosPage() {
       {view === "detalhe" && convenio && (
         <DetalheConvenio
           convenio={convenio}
-          onPersist={(conv) => persist(convenios.map((c) => c.id === conv.id ? conv : c))}
+          onPersist={(conv) => {
+            atualizarConvenio(conv.id, conv).catch((err) => {
+              console.error(err);
+              toast.error("Erro ao salvar alterações do convênio");
+            });
+            persist(convenios.map((c) => c.id === conv.id ? conv : c));
+          }}
           onAbrirTabela={(tabId) => abrirTabela(convenio.id, tabId)}
         />
       )}
@@ -204,6 +232,10 @@ function ConveniosPage() {
           tabela={tabela}
           onPersist={(tab) => {
             const conv = { ...convenio, tabelas: convenio.tabelas.map((t) => t.id === tab.id ? tab : t) };
+            atualizarConvenio(conv.id, conv).catch((err) => {
+              console.error(err);
+              toast.error("Erro ao salvar tabela de preços");
+            });
             persist(convenios.map((c) => c.id === conv.id ? conv : c));
           }}
         />
@@ -243,7 +275,7 @@ function ListaConvenios({
     setFormOpen(true);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!form.name.trim()) { toast.error("Informe o nome"); return; }
     // Verifica duplicidade de nome
     const nomeLower = form.name.trim().toLowerCase();
@@ -251,25 +283,42 @@ function ListaConvenios({
       (c) => c.name.toLowerCase() === nomeLower && c.id !== editingId
     );
     if (duplicado) { toast.error(`Já existe um convênio com o nome "${form.name.trim()}".`); return; }
-    if (editingId) {
-      onPersist(convenios.map((c) => c.id === editingId ? { ...c, ...form } : c));
-      toast.success("Convênio atualizado");
-      registrarAuditoria("EDITAR_CONVENIO", `Convênio "${form.name}" atualizado`);
-    } else {
-      onPersist([...convenios, { ...form, id: `conv_${uid()}`, planos: [], tabelas: [] }]);
-      toast.success("Convênio cadastrado");
-      registrarAuditoria("CRIAR_CONVENIO", `Convênio "${form.name}" cadastrado`);
+
+    try {
+      if (editingId) {
+        const atual = convenios.find((c) => c.id === editingId);
+        const atualizado = { ...atual, ...form } as Convenio;
+        await atualizarConvenio(editingId, atualizado);
+        onPersist(convenios.map((c) => c.id === editingId ? atualizado : c));
+        toast.success("Convênio atualizado");
+        registrarAuditoria("EDITAR_CONVENIO", `Convênio "${form.name}" atualizado`);
+      } else {
+        const novo = await criarConvenio({ ...form, planos: [], tabelas: [] });
+        onPersist([...convenios, novo as Convenio]);
+        toast.success("Convênio cadastrado");
+        registrarAuditoria("CRIAR_CONVENIO", `Convênio "${form.name}" cadastrado`);
+      }
+      setFormOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao salvar convênio");
     }
-    setFormOpen(false);
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deleteId) return;
-    onPersist(convenios.filter((c) => c.id !== deleteId));
-    const removido = convenios.find((x: any) => x.id === deleteId);
-    toast.success("Convênio removido");
-    registrarAuditoria("EXCLUIR_CONVENIO", `Convênio "${removido?.name ?? deleteId}" excluído`);
-    setDeleteId(null);
+    try {
+      await excluirConvenio(deleteId);
+      const removido = convenios.find((x: any) => x.id === deleteId);
+      onPersist(convenios.filter((c) => c.id !== deleteId));
+      toast.success("Convênio removido");
+      registrarAuditoria("EXCLUIR_CONVENIO", `Convênio "${removido?.name ?? deleteId}" excluído`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao excluir convênio");
+    } finally {
+      setDeleteId(null);
+    }
   }
 
   const ativos = convenios.filter((c) => c.status === "ativo").length;

@@ -959,6 +959,13 @@ function AgendaPage() {
   }
 
   function createAppointment(data: Omit<AppointmentExt, "id" | "status">) {
+    const PROF_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!data.professionalId || !PROF_UUID_RE.test(data.professionalId)) {
+      toast.error("Selecione um profissional válido antes de agendar.", {
+        description: "A lista de profissionais pode não ter carregado a tempo — tente novamente em alguns segundos.",
+      });
+      return;
+    }
     const exists = appointments.find(
       (a) =>
         a.date === data.date &&
@@ -1958,7 +1965,7 @@ function AgendaPage() {
                           if (slotAppts.length === 0) {
                             setCurrentDate(startOfDay(day));
                             setView("day");
-                            setNewDefaults({ professionalId: visibleProfs[0]?.id ?? allProfessionals[0]?.id ?? "p1", start: `${String(h).padStart(2, "0")}:00`, date: key });
+                            setNewDefaults({ professionalId: visibleProfs[0]?.id ?? allProfessionals[0]?.id ?? "", start: `${String(h).padStart(2, "0")}:00`, date: key });
                             setNewOpen(true);
                           }
                         }}
@@ -2469,7 +2476,7 @@ function AgendaPage() {
       <NewAppointmentDialog
         open={newOpen}
         onOpenChange={(o) => { setNewOpen(o); if (!o) setNewDefaults(null); }}
-        defaultProfessional={newDefaults?.professionalId ?? visibleProfs[0]?.id ?? allProfessionals[0]?.id ?? "p1"}
+        defaultProfessional={newDefaults?.professionalId ?? visibleProfs[0]?.id ?? allProfessionals[0]?.id ?? ""}
         defaultStart={newDefaults?.start}
         defaultDate={newDefaults?.date}
         currentDate={currentDate}

@@ -407,6 +407,25 @@ function AgendaPage() {
   const [profIds, setProfIds] = useState<string[]>(
     allProfessionals.filter((p: any) => p.active).map((p: any) => p.id)
   );
+
+  // ✅ CORREÇÃO: sincroniza profIds quando allProfessionals carrega do Supabase.
+  // Sem isso, profIds fica com IDs antigos do mock ("p1", "p2") enquanto
+  // allProfessionals já contém UUIDs reais, causando o erro
+  // "professionalId inválido recebido em createAppointment".
+  useEffect(() => {
+    const idsAtivos = allProfessionals
+      .filter((p: any) => p.active)
+      .map((p: any) => p.id);
+    if (idsAtivos.length > 0) {
+      setProfIds((prev) => {
+        // Só atualiza se os IDs realmente mudaram (evita re-render desnecessário)
+        const prevSet = new Set(prev);
+        const changed = idsAtivos.length !== prev.length || idsAtivos.some((id) => !prevSet.has(id));
+        return changed ? idsAtivos : prev;
+      });
+    }
+  }, [allProfessionals]);
+
   // aba da agenda: "profissionais" | "exames"
   const [agendaTab, setAgendaTab] = useState<"profissionais" | "exames">("profissionais");
   const [filterEspecialidade, setFilterEspecialidade] = useState<string>("all");

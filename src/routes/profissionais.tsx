@@ -1,3 +1,9 @@
+import {
+  listarProfissionais,
+  criarProfissional,
+  atualizarProfissional,
+  excluirProfissional,
+} from "@/lib/agendaData";
 import { createFileRoute } from "@tanstack/react-router";
 import { temPermissao, eAdmin, registrarAuditoria } from "@/lib/auth";
 import { useState, useEffect, useRef } from "react";
@@ -145,25 +151,82 @@ function AvatarUpload({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Selecione um arquivo de imagem (JPG, PNG, etc.)");
+  async function handleSubmit() {
+  if (!form.name.trim()) {
+    toast.error("Informe o nome");
+    return;
+  }
+
+  if (form.tipo === "profissional") {
+    if (!form.specialty.trim()) {
+      toast.error("Informe a especialidade");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Imagem muito grande. Use uma foto menor que 5 MB.");
+
+    if (!form.crm.trim()) {
+      toast.error("Informe o CRM");
       return;
     }
-    try {
-      const base64 = await fileToBase64(file);
-      const resized = await resizeImage(base64);
-      onChange(resized);
-      toast.success("Foto carregada com sucesso!");
-    } catch {
-      toast.error("Erro ao carregar a imagem.");
+  }
+
+  const nomeLower = form.name.trim().toLowerCase();
+
+  const duplicado = professionals.find(
+    (p: any) =>
+      p.name.toLowerCase() === nomeLower &&
+      p.id !== editingId
+  );
+
+  if (duplicado) {
+    toast.error(
+      `Já existe um profissional com o nome "${form.name.trim()}".`
+    );
+    return;
+  }
+
+  try {
+    if (editingId) {
+      await atualizarProfissional(editingId, form);
+
+      setProfessionals((prev) =>
+        prev.map((p) =>
+          p.id === editingId ? { ...p, ...form } : p
+        )
+      );
+
+      registrarAuditoria(
+        "EDITAR_PROFISSIONAL",
+        `Profissional/sala "${form.name}" atualizado`
+      );
+
+      toast.success(
+        form.tipo === "exame"
+          ? "Sala de exame atualizada"
+          : "Profissional atualizado"
+      );
+    } else {
+      const novo = await criarProfissional(form);
+
+      setProfessionals((prev) => [...prev, novo]);
+
+      registrarAuditoria(
+        "CRIAR_PROFISSIONAL",
+        `Profissional/sala "${form.name}" cadastrado`
+      );
+
+      toast.success(
+        form.tipo === "exame"
+          ? "Sala de exame cadastrada"
+          : "Profissional cadastrado"
+      );
     }
+
+    setFormOpen(false);
+  } catch (error) {
+    console.error(error);
+    toast.error("Erro ao salvar profissional");
+  }
+}
     // limpa o input para permitir reselecionar o mesmo arquivo
     e.target.value = "";
   }
@@ -230,7 +293,8 @@ function AvatarUpload({
 // ── Página principal ────────────────────────────────────────────────────────
 function ProfissionaisPage() {
   const { specialties } = useSpecialty();
-  const [professionals, setProfessionals] = useState<Professional[]>(() => readProfessionals());
+ const [professionals, setProfessionals] =
+  useState<Professional[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<typeof emptyForm>(emptyForm);
@@ -238,7 +302,19 @@ function ProfissionaisPage() {
   const [conveniosDisp, setConveniosDisp] = useState<string[]>(() => readConveniosNomesProf());
   const [procsDisp, setProcsDisp] = useState<string[]>(() => readProcedimentos().map((p: any) => p.name));
 
-  useEffect(() => { setProfessionals(readProfessionals()); }, []);
+  useEffect(() => {
+  async function carregar() {
+    try {
+      const lista = await listarProfissionais();
+      setProfessionals(lista as Professional[]);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao carregar profissionais");
+    }
+  }
+
+  carregar();
+}, []);
   useEffect(() => {
     if (formOpen) {
       setConveniosDisp(readConveniosNomesProf());
@@ -300,24 +376,42 @@ function ProfissionaisPage() {
     if (editingId) {
       persist(professionals.map((p) => p.id === editingId ? { ...p, ...form } : p));
       toast.success(form.tipo === "exame" ? "Sala de exame atualizada" : "Profissional atualizado");
-      registrarAuditoria("EDITAR_PROFISSIONAL", `Profissional/sala "${form.nome}" atualizado`);
+      registrarAuditoria("EDITAR_PROFISSIONAL", `Profissional/sala "${form.name}" atualizado`);
     } else {
       const novo: Professional = { ...form, id: `prof_${Date.now()}` };
       persist([...professionals, novo]);
       toast.success(form.tipo === "exame" ? "Sala de exame cadastrada" : "Profissional cadastrado");
-      registrarAuditoria("CRIAR_PROFISSIONAL", `Profissional/sala "${form.nome}" cadastrado`);
+      registrarAuditoria("CRIAR_PROFISSIONAL", `Profissional/sala "${form.name}" cadastrado`);
     }
     setFormOpen(false);
   }
 
-  function handleDelete() {
-    if (!deleteId) return;
-    persist(professionals.filter((p) => p.id !== deleteId));
-    const removido = professionals.find(p => p.id === deleteId);
+  async function handleDelete() {
+  if (!deleteId) return;
+
+  try {
+    await excluirProfissional(deleteId);
+
+    const removido = professionals.find(
+      (p) => p.id === deleteId
+    );
+
+    setProfessionals((prev) =>
+      prev.filter((p) => p.id !== deleteId)
+    );
+
+    registrarAuditoria(
+      "EXCLUIR_PROFISSIONAL",
+      `Profissional "${removido?.name ?? deleteId}" excluído`
+    );
+
     toast.success("Profissional removido");
-    registrarAuditoria("EXCLUIR_PROFISSIONAL", `Profissional "${removido?.nome ?? deleteId}" excluído`);
     setDeleteId(null);
+  } catch (error) {
+    console.error(error);
+    toast.error("Erro ao remover profissional");
   }
+}
 
   return (
     <div className="space-y-6">

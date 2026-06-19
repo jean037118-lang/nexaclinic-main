@@ -270,3 +270,87 @@ export async function excluirConvenio(id: string) {
     throw error;
   }
 }
+
+/* =========================================
+   PROCEDIMENTOS
+========================================= */
+
+function mapProcFromDb(row: any) {
+  return {
+    id: row.id,
+    name: row.name,
+    tussCode: row.tuss_code ?? "",
+    category: row.category ?? "",
+    durationMin: row.duration_min ?? 30,
+    valorParticular: row.valor_particular != null ? String(row.valor_particular) : "",
+    convenioValores: row.convenio_valores ?? [],
+    valorPorProfissional: row.valor_por_profissional ?? [],
+    status: row.status ?? "ativo",
+    tipoConsulta: row.tipo_consulta ?? false,
+    tipoRetorno: row.tipo_retorno ?? false,
+    prazoRetornoDias: row.prazo_retorno_dias ?? 30,
+  };
+}
+
+function mapProcToDb(p: any) {
+  return {
+    name: p.name,
+    tuss_code: p.tussCode,
+    category: p.category,
+    duration_min: p.durationMin,
+    valor_particular: p.valorParticular === "" ? null : Number(p.valorParticular),
+    convenio_valores: p.convenioValores ?? [],
+    valor_por_profissional: p.valorPorProfissional ?? [],
+    status: p.status,
+    tipo_consulta: p.tipoConsulta ?? false,
+    tipo_retorno: p.tipoRetorno ?? false,
+    prazo_retorno_dias: p.prazoRetornoDias ?? 30,
+  };
+}
+
+export async function listarProcedimentos() {
+  const { data, error } = await supabase
+    .from("procedimentos")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    console.error("Erro ao listar procedimentos:", error);
+    return [];
+  }
+  return (data || []).map(mapProcFromDb);
+}
+
+export async function criarProcedimento(proc: any) {
+  const { data, error } = await supabase
+    .from("procedimentos")
+    .insert(mapProcToDb(proc))
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Erro ao criar procedimento:", error);
+    throw error;
+  }
+  return mapProcFromDb(data);
+}
+
+export async function atualizarProcedimento(id: string, proc: any) {
+  const { error } = await supabase
+    .from("procedimentos")
+    .update(mapProcToDb(proc))
+    .eq("id", id);
+
+  if (error) {
+    console.error("Erro ao atualizar procedimento:", error);
+    throw error;
+  }
+}
+
+export async function excluirProcedimento(id: string) {
+  const { error } = await supabase.from("procedimentos").delete().eq("id", id);
+  if (error) {
+    console.error("Erro ao excluir procedimento:", error);
+    throw error;
+  }
+}

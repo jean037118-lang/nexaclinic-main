@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { eAdmin, registrarAuditoria } from "@/lib/auth";
+import {
+  listarProcedimentos,
+  criarProcedimento,
+  atualizarProcedimento,
+  excluirProcedimento,
+} from "@/lib/agendaData";
 import { useState, useEffect } from "react";
 import { Plus, Search, Activity, Pencil, Trash2, DollarSign, Hash, RotateCcw, Stethoscope } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -131,7 +137,7 @@ function fmt(v: string) {
 
 // ─── página ──────────────────────────────────────────────────────────────────
 function ProcedimentosPage() {
-  const [procedimentos, setProcedimentos] = useState<Procedimento[]>(() => readProcedimentos());
+  const [procedimentos, setProcedimentos] = useState<Procedimento[]>([]);
   const [conveniosNomes, setConveniosNomes] = useState<string[]>(() => readConveniosNomes());
   const [profissionais, setProfissionais] = useState<{ id: string; name: string; specialty?: string }[]>([]);
   const [q, setQ] = useState("");
@@ -141,7 +147,18 @@ function ProcedimentosPage() {
   const [form, setForm] = useState<Omit<Procedimento, "id">>(emptyForm);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  useEffect(() => { setProcedimentos(readProcedimentos()); }, []);
+  useEffect(() => {
+    async function carregar() {
+      try {
+        const lista = await listarProcedimentos();
+        setProcedimentos(lista as Procedimento[]);
+      } catch (err) {
+        console.error(err);
+        toast.error("Erro ao carregar procedimentos");
+      }
+    }
+    carregar();
+  }, []);
   // Relê convênios e profissionais toda vez que o dialog abre para capturar novos cadastros
   useEffect(() => {
     if (formOpen) {
@@ -156,7 +173,7 @@ function ProcedimentosPage() {
     }
   }, [formOpen]);
 
-  function persist(list: Procedimento[]) { saveProcedimentos(list); setProcedimentos(list); }
+  function persist(list: Procedimento[]) { setProcedimentos(list); }
 
   const filtered = procedimentos
     .filter((p) => catFilter === "Todos" || p.category === catFilter)
@@ -179,7 +196,7 @@ function ProcedimentosPage() {
     setFormOpen(true);
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!form.name.trim()) { toast.error("Informe o nome do procedimento"); return; }
     // Verifica duplicidade de nome
     const nomeLower = form.name.trim().toLowerCase();
@@ -187,25 +204,42 @@ function ProcedimentosPage() {
       (p: any) => p.name.toLowerCase() === nomeLower && p.id !== editingId
     );
     if (duplicado) { toast.error(`Já existe um procedimento com o nome "${form.name.trim()}".`); return; }
-    if (editingId) {
-      persist(procedimentos.map((p) => p.id === editingId ? { ...p, ...form } : p));
-      toast.success("Procedimento atualizado");
-      registrarAuditoria("EDITAR_PROCEDIMENTO", `Procedimento "${form.name}" atualizado`);
-    } else {
-      persist([...procedimentos, { ...form, id: `proc_${Date.now()}` }]);
-      toast.success("Procedimento cadastrado");
-      registrarAuditoria("CRIAR_PROCEDIMENTO", `Procedimento "${form.name}" cadastrado`);
+
+    try {
+      if (editingId) {
+        const atual = procedimentos.find((p) => p.id === editingId);
+        const atualizado = { ...atual, ...form } as Procedimento;
+        await atualizarProcedimento(editingId, atualizado);
+        persist(procedimentos.map((p) => p.id === editingId ? atualizado : p));
+        toast.success("Procedimento atualizado");
+        registrarAuditoria("EDITAR_PROCEDIMENTO", `Procedimento "${form.name}" atualizado`);
+      } else {
+        const novo = await criarProcedimento(form);
+        persist([...procedimentos, novo as Procedimento]);
+        toast.success("Procedimento cadastrado");
+        registrarAuditoria("CRIAR_PROCEDIMENTO", `Procedimento "${form.name}" cadastrado`);
+      }
+      setFormOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao salvar procedimento");
     }
-    setFormOpen(false);
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deleteId) return;
-    persist(procedimentos.filter((p) => p.id !== deleteId));
-    const removido = procedimentos.find((p: any) => p.id === deleteId);
-    toast.success("Procedimento removido");
-    registrarAuditoria("EXCLUIR_PROCEDIMENTO", `Procedimento "${removido?.name ?? deleteId}" excluído`);
-    setDeleteId(null);
+    try {
+      await excluirProcedimento(deleteId);
+      const removido = procedimentos.find((p: any) => p.id === deleteId);
+      persist(procedimentos.filter((p) => p.id !== deleteId));
+      toast.success("Procedimento removido");
+      registrarAuditoria("EXCLUIR_PROCEDIMENTO", `Procedimento "${removido?.name ?? deleteId}" excluído`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao excluir procedimento");
+    } finally {
+      setDeleteId(null);
+    }
   }
 
   // gerencia os valores por convênio no formulário

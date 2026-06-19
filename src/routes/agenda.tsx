@@ -408,7 +408,7 @@ function AgendaPage() {
     allProfessionals.filter((p: any) => p.active).map((p: any) => p.id)
   );
 
-  // ✅ CORREÇÃO: sincroniza profIds quando allProfessionals carrega do Supabase.
+  // ✅ CORREÇÃO 1: sincroniza profIds quando allProfessionals carrega do Supabase.
   // Sem isso, profIds fica com IDs antigos do mock ("p1", "p2") enquanto
   // allProfessionals já contém UUIDs reais, causando o erro
   // "professionalId inválido recebido em createAppointment".
@@ -418,7 +418,6 @@ function AgendaPage() {
       .map((p: any) => p.id);
     if (idsAtivos.length > 0) {
       setProfIds((prev) => {
-        // Só atualiza se os IDs realmente mudaram (evita re-render desnecessário)
         const prevSet = new Set(prev);
         const changed = idsAtivos.length !== prev.length || idsAtivos.some((id) => !prevSet.has(id));
         return changed ? idsAtivos : prev;
@@ -2500,6 +2499,7 @@ function AgendaPage() {
         defaultStart={newDefaults?.start}
         defaultDate={newDefaults?.date}
         currentDate={currentDate}
+        professionals={allProfessionals}
         onCreate={createAppointment}
         isProfAvailableOnDate={isProfAvailableOnDate}
       />
@@ -3152,7 +3152,7 @@ function ProfInfoDialog({ open, onOpenChange, prof, currentDate, isProfAvailable
 
 // ─── Dialog: novo agendamento ─────────────────────────────────────────────
 function NewAppointmentDialog({
-  open, onOpenChange, defaultProfessional, defaultStart, defaultDate, currentDate, onCreate, isProfAvailableOnDate,
+  open, onOpenChange, defaultProfessional, defaultStart, defaultDate, currentDate, professionals: profissionaisList, onCreate, isProfAvailableOnDate,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -3160,6 +3160,7 @@ function NewAppointmentDialog({
   defaultStart?: string;
   defaultDate?: string;
   currentDate: Date;
+  professionals?: any[];
   onCreate: (data: Omit<AppointmentExt, "id" | "status">) => void;
   isProfAvailableOnDate?: (prof: any, dateStr: string) => boolean;
 }) {
@@ -3253,7 +3254,14 @@ function NewAppointmentDialog({
 
   useEffect(() => {
     if (open) {
-      setProfId(defaultProfessional);
+      // ✅ CORREÇÃO 3: garante que profId inicial é um UUID válido.
+      // Se defaultProfessional for um ID legado ("p1", "p2"), usa o primeiro
+      // profissional ativo da lista real recebida via prop.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const resolvedProfId = UUID_RE.test(defaultProfessional)
+        ? defaultProfessional
+        : (profissionaisList ?? []).find((p: any) => p.active)?.id ?? defaultProfessional;
+      setProfId(resolvedProfId);
       setStart(defaultStart ?? "09:00");
       setDate(defaultDate ?? toDateKey(currentDate));
       setPatientName("");
@@ -3506,8 +3514,13 @@ function NewAppointmentDialog({
                 <SelectContent>
                   {(() => {
                     try {
+                      // ✅ CORREÇÃO 2: usa a prop `profissionaisList` (vinda do estado do pai,
+                      // já atualizada com UUIDs reais do Supabase) em vez de ler direto do
+                      // localStorage, que pode conter IDs antigos do mock ("p1", "p2").
                       const saved = localStorage.getItem("nexaclinic_professionals");
-                      const profs = saved ? JSON.parse(saved) : professionals;
+                      const profs = profissionaisList && profissionaisList.length > 0
+                        ? profissionaisList
+                        : saved ? JSON.parse(saved) : professionals;
                       return profs.filter((p: any) => p.active).map((p: any) => {
                         const disponivel = !isProfAvailableOnDate || !date || isProfAvailableOnDate(p, date);
                         return (

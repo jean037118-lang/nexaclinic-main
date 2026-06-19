@@ -961,6 +961,7 @@ function AgendaPage() {
   function createAppointment(data: Omit<AppointmentExt, "id" | "status">) {
     const PROF_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!data.professionalId || !PROF_UUID_RE.test(data.professionalId)) {
+      console.error("professionalId inválido recebido em createAppointment:", JSON.stringify(data.professionalId), "| allProfessionals carregados:", allProfessionals.length);
       toast.error("Selecione um profissional válido antes de agendar.", {
         description: "A lista de profissionais pode não ter carregado a tempo — tente novamente em alguns segundos.",
       });

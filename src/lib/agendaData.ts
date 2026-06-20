@@ -312,3 +312,20 @@ export async function excluirConta(id: string) {
     throw error;
   }
 }
+
+/* =========================================
+   PROCEDIMENTOS
+========================================= */
+
+export async function listarProcedimentos() {
+  const { data, error } = await supabase
+    .from("procedimentos")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    console.error("Erro ao listar procedimentos:", error);
+    return [];
+  }
+  return data || [];
+}

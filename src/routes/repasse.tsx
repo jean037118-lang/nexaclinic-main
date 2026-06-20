@@ -26,6 +26,11 @@ import {
 import { toast } from "sonner";
 import { professionals } from "@/lib/mock-data";
 import type { AppointmentExt } from "./agenda";
+import {
+  listarProfissionais,
+  listarProcedimentos,
+  listarAgendamentos,
+} from "@/lib/agendaData";
 
 export const Route = createFileRoute("/repasse")({
   head: () => ({ meta: [{ title: "Repasse Médico — NexaClinic" }] }),
@@ -231,32 +236,70 @@ Período: ${dateFrom} a ${dateTo}`,
     setContaDialogOpen(true);
   }
 
-  function salvarContaPagar() {
+  async function salvarContaPagar() {
     if (!contaForm.dueDate) { toast.error("Informe a data de vencimento"); return; }
     if (!contaForm.description.trim()) { toast.error("Informe a descrição"); return; }
     const now = new Date().toISOString();
-    financialStorage.saveAccount({
-      id: `account_${Date.now()}`,
-      type: "pagar",
-      description: contaForm.description,
-      value: contaForm.valorRepasse,
-      dueDate: contaForm.dueDate,
-      category: "repasse_medico",
-      status: "pendente",
-      notes: contaForm.notes,
-      createdAt: now,
-      updatedAt: now,
-    });
-    toast.success(`Conta a pagar criada — ${fmtBRL(contaForm.valorRepasse)}`, {
-      description: contaForm.description,
-    });
-    setContaDialogOpen(false);
+    try {
+      await financialStorage.saveAccount({
+        id: "",
+        type: "pagar",
+        description: contaForm.description,
+        value: contaForm.valorRepasse,
+        dueDate: contaForm.dueDate,
+        category: "repasse_medico",
+        status: "pendente",
+        notes: contaForm.notes,
+        createdAt: now,
+        updatedAt: now,
+      });
+      toast.success(`Conta a pagar criada — ${fmtBRL(contaForm.valorRepasse)}`, {
+        description: contaForm.description,
+      });
+      setContaDialogOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao criar conta a pagar");
+    }
   }
 
-  // Carrega dados
-  const appointments = useMemo(() => loadAppointments(), []);
-  const procedimentos = useMemo(() => loadProcedimentos(), []);
-  const profs = useMemo(() => loadProfessionals(), []);
+  // Carrega dados do Supabase
+  const [appointments, setAppointments] = useState<AppointmentExt[]>([]);
+  const [procedimentos, setProcedimentos] = useState<Procedimento[]>([]);
+  const [profs, setProfs] = useState<Professional[]>([]);
+  const [loadingDados, setLoadingDados] = useState(true);
+
+  useEffect(() => {
+    async function carregar() {
+      try {
+        const [apts, procs, profissionaisDb] = await Promise.all([
+          listarAgendamentos(),
+          listarProcedimentos(),
+          listarProfissionais(),
+        ]);
+        setAppointments(apts as AppointmentExt[]);
+        setProcedimentos(procs as Procedimento[]);
+        // Mescla percentual legado salvo em localStorage apenas se o profissional
+        // não tiver repasseValue definido no banco (compatibilidade).
+        const percs: Record<string, number> = (() => {
+          try { return JSON.parse(localStorage.getItem(REPASSE_PERC_KEY) ?? "{}"); }
+          catch { return {}; }
+        })();
+        setProfs((profissionaisDb as Professional[]).map((p) => ({
+          ...p,
+          repasseType: p.repasseType ?? "percentual",
+          repasseValue: p.repasseValue ?? percs[p.id] ?? 50,
+          repasseRegras: (p as any).repasseRegras ?? [],
+        })));
+      } catch (err) {
+        console.error(err);
+        toast.error("Erro ao carregar dados de repasse");
+      } finally {
+        setLoadingDados(false);
+      }
+    }
+    carregar();
+  }, []);
 
   // ─── Monta linhas de repasse ──────────────────────────────────────────
   const allRows = useMemo<RepasseRow[]>(() => {

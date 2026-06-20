@@ -71,7 +71,10 @@ function loadPaidAppointments(): AppointmentRaw[] {
   try {
     const raw = localStorage.getItem(APPT_KEY);
     if (!raw) return [];
-    const all: AppointmentRaw[] = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // ✅ Garante que o dado é array antes de filtrar — localStorage pode conter
+    // objeto ou null se houve migração de chave ou gravação incorreta.
+    const all: AppointmentRaw[] = Array.isArray(parsed) ? parsed : [];
     return all.filter(
       (a) =>
         (a.paid === true || a.pago === true) &&
@@ -131,11 +134,17 @@ export function useFinancial() {
 
   useEffect(() => {
     try {
-      setManualAccounts(financialStorage.getAccounts());
-      setCommissions(financialStorage.getCommissions());
+      // ✅ Garante arrays mesmo que storage retorne null/objeto (ex: Supabase ou
+      // localStorage corrompido), prevenindo "r is not iterable" no useMemo de accounts.
+      const rawAccounts = financialStorage.getAccounts();
+      const rawCommissions = financialStorage.getCommissions();
+      setManualAccounts(Array.isArray(rawAccounts) ? rawAccounts : []);
+      setCommissions(Array.isArray(rawCommissions) ? rawCommissions : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar dados');
+      setManualAccounts([]);
+      setCommissions([]);
     } finally {
       setLoading(false);
     }
@@ -147,8 +156,13 @@ export function useFinancial() {
   }, []);
 
   // Todas as contas unificadas
+  // ✅ Array.isArray guards evitam "r is not iterable" caso alguma fonte retorne
+  // null/undefined (ex: storage falhou silenciosamente antes do setLoading(false)).
   const accounts = useMemo<Account[]>(
-    () => [...manualAccounts, ...apptAccounts],
+    () => [
+      ...(Array.isArray(manualAccounts) ? manualAccounts : []),
+      ...(Array.isArray(apptAccounts)   ? apptAccounts   : []),
+    ],
     [manualAccounts, apptAccounts]
   );
 
@@ -177,7 +191,7 @@ export function useFinancial() {
       pendingPayable:    payable.filter((a) => a.status === 'pendente').reduce((s, a) => s + a.value, 0),
       overdueReceivable: receivable.filter((a) => a.status === 'vencido').reduce((s, a) => s + a.value, 0),
       overduePayable:    payable.filter((a) => a.status === 'vencido').reduce((s, a) => s + a.value, 0),
-      totalCommissions:  commissions.reduce((s, c) => s + c.value, 0),
+      totalCommissions:  (Array.isArray(commissions) ? commissions : []).reduce((s, c) => s + c.value, 0),
       accountsCount:     accounts.length,
       commissionsCount:  commissions.length,
       caixaCentral:  byDestino('caixa_central'),

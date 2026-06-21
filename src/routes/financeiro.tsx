@@ -168,7 +168,7 @@ function DestinoCard({
 function FinanceiroHub() {
   const {
     summary, loading, formatCurrency, exportAccountsToCSV,
-    resumoDestinos, apptAccounts, getContasByDestino,
+    resumoDestinos, apptAccounts, getContasByDestino, reload,
   } = useFinancial();
 
   // ── Estado dos modais ────────────────────────────────────────────────────────
@@ -179,7 +179,10 @@ function FinanceiroHub() {
 
   // Força re-render após salvar movimentação
   const [refreshKey, setRefreshKey] = useState(0);
-  const handleMovSaved = useCallback(() => setRefreshKey(k => k + 1), []);
+  const handleMovSaved = useCallback(() => {
+    setRefreshKey(k => k + 1);
+    reload(); // recarrega accounts/commissions do Supabase
+  }, [reload]);
 
   function abrirSaida(destino: DestinoFinanceiro) {
     setMovDestino(destino);

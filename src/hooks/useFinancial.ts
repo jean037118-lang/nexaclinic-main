@@ -132,28 +132,33 @@ export function useFinancial() {
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState<string | null>(null);
 
-  useEffect(() => {
-    async function carregar() {
-      try {
-        // ✅ financialStorage agora é assíncrono (Supabase) — precisa de await,
-        // senão recebemos a Promise em vez do array e quebra o .map/.filter adiante.
-        const [rawAccounts, rawCommissions] = await Promise.all([
-          financialStorage.getAccounts(),
-          financialStorage.getCommissions(),
-        ]);
-        setManualAccounts(Array.isArray(rawAccounts) ? rawAccounts : []);
-        setCommissions(Array.isArray(rawCommissions) ? rawCommissions : []);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Erro ao carregar dados');
-        setManualAccounts([]);
-        setCommissions([]);
-      } finally {
-        setLoading(false);
-      }
+  const carregar = useCallback(async () => {
+    try {
+      // ✅ financialStorage agora é assíncrono (Supabase) — precisa de await,
+      // senão recebemos a Promise em vez do array e quebra o .map/.filter adiante.
+      const [rawAccounts, rawCommissions] = await Promise.all([
+        financialStorage.getAccounts(),
+        financialStorage.getCommissions(),
+      ]);
+      setManualAccounts(Array.isArray(rawAccounts) ? rawAccounts : []);
+      setCommissions(Array.isArray(rawCommissions) ? rawCommissions : []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao carregar dados');
+      setManualAccounts([]);
+      setCommissions([]);
+    } finally {
+      setLoading(false);
     }
-    carregar();
   }, []);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  // Permite recarregar manualmente após operações feitas fora dos helpers
+  // deste hook (ex: MovimentacaoModal salvando direto via financialStorage).
+  const reload = useCallback(() => { carregar(); }, [carregar]);
 
   // Agendamentos pagos → accounts virtuais (com destino calculado)
   const apptAccounts = useMemo<Account[]>(() => {
@@ -486,6 +491,7 @@ export function useFinancial() {
     commissions,
     loading,
     error,
+    reload,
     // Resumos
     summary,
     resumoDestinos,

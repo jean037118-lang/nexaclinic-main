@@ -112,13 +112,12 @@ function MovimentacaoInner({
     setSalvando(true);
 
     const now = new Date().toISOString();
-    const id = `mov_${Date.now()}`;
 
     try {
       if (modo === 'saida') {
         // ── Saída simples: uma conta a pagar marcada como paga ───────────────
-        financialStorage.saveAccount({
-          id,
+        await financialStorage.saveAccount({
+          id: '', // gerado pelo Supabase (uuid)
           type: 'pagar',
           description: descricao.trim() || categoria,
           value: valorNum,
@@ -141,8 +140,8 @@ function MovimentacaoInner({
         const desc = descricao.trim() || `Transferência ${DESTINO_LABELS[origem]} → ${DESTINO_LABELS[destino]}`;
 
         // Saída da origem
-        financialStorage.saveAccount({
-          id: `${id}_saida`,
+        await financialStorage.saveAccount({
+          id: '',
           type: 'pagar',
           description: `[Transf. saída] ${desc}`,
           value: valorNum,
@@ -157,8 +156,8 @@ function MovimentacaoInner({
         });
 
         // Entrada no destino
-        financialStorage.saveAccount({
-          id: `${id}_entrada`,
+        await financialStorage.saveAccount({
+          id: '',
           type: 'receber',
           description: `[Transf. entrada] ${desc}`,
           value: valorNum,

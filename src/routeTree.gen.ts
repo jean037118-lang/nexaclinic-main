@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WhatsappRouteImport } from './routes/whatsapp'
+import { Route as UsuariosRouteImport } from './routes/usuarios'
 import { Route as TissRouteImport } from './routes/tiss'
 import { Route as TelefoniaRouteImport } from './routes/telefonia'
 import { Route as RepasseRouteImport } from './routes/repasse'
@@ -36,6 +37,11 @@ import { Route as FinanceiroComissoesRouteImport } from './routes/financeiro/com
 const WhatsappRoute = WhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsuariosRoute = UsuariosRouteImport.update({
+  id: '/usuarios',
+  path: '/usuarios',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TissRoute = TissRouteImport.update({
@@ -167,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/repasse': typeof RepasseRoute
   '/telefonia': typeof TelefoniaRoute
   '/tiss': typeof TissRoute
+  '/usuarios': typeof UsuariosRoute
   '/whatsapp': typeof WhatsappRoute
   '/financeiro/comissoes': typeof FinanceiroComissoesRoute
   '/financeiro/contas-pagar': typeof FinanceiroContasPagarRoute
@@ -192,6 +199,7 @@ export interface FileRoutesByTo {
   '/repasse': typeof RepasseRoute
   '/telefonia': typeof TelefoniaRoute
   '/tiss': typeof TissRoute
+  '/usuarios': typeof UsuariosRoute
   '/whatsapp': typeof WhatsappRoute
   '/financeiro/comissoes': typeof FinanceiroComissoesRoute
   '/financeiro/contas-pagar': typeof FinanceiroContasPagarRoute
@@ -218,6 +226,7 @@ export interface FileRoutesById {
   '/repasse': typeof RepasseRoute
   '/telefonia': typeof TelefoniaRoute
   '/tiss': typeof TissRoute
+  '/usuarios': typeof UsuariosRoute
   '/whatsapp': typeof WhatsappRoute
   '/financeiro/comissoes': typeof FinanceiroComissoesRoute
   '/financeiro/contas-pagar': typeof FinanceiroContasPagarRoute
@@ -245,6 +254,7 @@ export interface FileRouteTypes {
     | '/repasse'
     | '/telefonia'
     | '/tiss'
+    | '/usuarios'
     | '/whatsapp'
     | '/financeiro/comissoes'
     | '/financeiro/contas-pagar'
@@ -270,6 +280,7 @@ export interface FileRouteTypes {
     | '/repasse'
     | '/telefonia'
     | '/tiss'
+    | '/usuarios'
     | '/whatsapp'
     | '/financeiro/comissoes'
     | '/financeiro/contas-pagar'
@@ -295,6 +306,7 @@ export interface FileRouteTypes {
     | '/repasse'
     | '/telefonia'
     | '/tiss'
+    | '/usuarios'
     | '/whatsapp'
     | '/financeiro/comissoes'
     | '/financeiro/contas-pagar'
@@ -321,6 +333,7 @@ export interface RootRouteChildren {
   RepasseRoute: typeof RepasseRoute
   TelefoniaRoute: typeof TelefoniaRoute
   TissRoute: typeof TissRoute
+  UsuariosRoute: typeof UsuariosRoute
   WhatsappRoute: typeof WhatsappRoute
 }
 
@@ -331,6 +344,13 @@ declare module '@tanstack/react-router' {
       path: '/whatsapp'
       fullPath: '/whatsapp'
       preLoaderRoute: typeof WhatsappRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usuarios': {
+      id: '/usuarios'
+      path: '/usuarios'
+      fullPath: '/usuarios'
+      preLoaderRoute: typeof UsuariosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tiss': {
@@ -528,6 +548,7 @@ const rootRouteChildren: RootRouteChildren = {
   RepasseRoute: RepasseRoute,
   TelefoniaRoute: TelefoniaRoute,
   TissRoute: TissRoute,
+  UsuariosRoute: UsuariosRoute,
   WhatsappRoute: WhatsappRoute,
 }
 export const routeTree = rootRouteImport

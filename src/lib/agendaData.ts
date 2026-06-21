@@ -5,9 +5,6 @@ import { supabase } from "./supabase";
 ========================================= */
 
 function mapProfFromDb(row: any) {
-  // Campos extras salvos como JSON em metadata (coluna jsonb no Supabase)
-  // ou individualmente se já existirem como colunas.
-  const meta = row.metadata ?? {};
   return {
     id: row.id,
     name: row.name,
@@ -17,23 +14,13 @@ function mapProfFromDb(row: any) {
     active: row.active ?? true,
     appointmentDuration: row.appointment_duration ?? 30,
     workDays: row.work_days ?? "",
-    repasseType: row.repasse_type ?? "percentual",
-    repasseValue: row.repasse_value ?? 50,
-    scheduleStart: row.schedule_start ?? meta.scheduleStart ?? "08:00",
-    scheduleEnd: row.schedule_end ?? meta.scheduleEnd ?? "18:00",
-    // Campos extras — lidos de colunas dedicadas (se existirem) ou do metadata
-    tipo: row.tipo ?? meta.tipo ?? "profissional",
-    agendaTipo: row.agenda_tipo ?? meta.agendaTipo ?? "permanente",
-    diasSemana: row.dias_semana ?? meta.diasSemana ?? [1, 2, 3, 4, 5],
-    datasEspecificas: row.datas_especificas ?? meta.datasEspecificas ?? [],
-    repasseRegras: row.repasse_regras ?? meta.repasseRegras ?? [],
-    repasseSomenteComPagamento:
-      row.repasse_somente_com_pagamento ??
-      meta.repasseSomenteComPagamento ??
-      true,
-    avatar: row.avatar ?? meta.avatar ?? "",
-    prazoRetornoDias: row.prazo_retorno_dias ?? meta.prazoRetornoDias ?? 30,
-    observacao: row.observacao ?? meta.observacao ?? "",
+    repasseType: row.repasse_type ?? "",
+    repasseValue: row.repasse_value ?? 0,
+    // Campos abaixo não existem na tabela ainda — mantidos por compatibilidade
+    // com telas que esperam horário de atendimento. Ajuste se/quando forem
+    // adicionados como colunas no Supabase.
+    scheduleStart: row.schedule_start ?? "08:00",
+    scheduleEnd: row.schedule_end ?? "18:00",
   };
 }
 
@@ -48,33 +35,6 @@ function mapProfToDb(p: any) {
     work_days: p.workDays,
     repasse_type: p.repasseType,
     repasse_value: p.repasseValue,
-    schedule_start: p.scheduleStart,
-    schedule_end: p.scheduleEnd,
-    // Campos extras — salvos em colunas dedicadas quando existirem no Supabase,
-    // e também em metadata como fallback para colunas ainda não criadas.
-    tipo: p.tipo ?? "profissional",
-    agenda_tipo: p.agendaTipo ?? "permanente",
-    dias_semana: p.diasSemana ?? [1, 2, 3, 4, 5],
-    datas_especificas: p.datasEspecificas ?? [],
-    repasse_regras: p.repasseRegras ?? [],
-    repasse_somente_com_pagamento: p.repasseSomenteComPagamento ?? true,
-    avatar: p.avatar ?? "",
-    prazo_retorno_dias: p.prazoRetornoDias ?? 30,
-    observacao: p.observacao ?? "",
-    // metadata como coluna jsonb de fallback (não falha se coluna não existir)
-    metadata: {
-      scheduleStart: p.scheduleStart,
-      scheduleEnd: p.scheduleEnd,
-      tipo: p.tipo,
-      agendaTipo: p.agendaTipo,
-      diasSemana: p.diasSemana,
-      datasEspecificas: p.datasEspecificas,
-      repasseRegras: p.repasseRegras,
-      repasseSomenteComPagamento: p.repasseSomenteComPagamento,
-      avatar: p.avatar,
-      prazoRetornoDias: p.prazoRetornoDias,
-      observacao: p.observacao,
-    },
   };
 }
 
@@ -228,87 +188,85 @@ export async function excluirAgendamento(id: string) {
 }
 
 /* =========================================
-   CONTAS FINANCEIRAS (accounts)
+   CONVÊNIOS
 ========================================= */
 
-function mapAccountFromDb(row: any) {
+function mapConvFromDb(row: any) {
   return {
     id: row.id,
-    type: row.type,                          // 'pagar' | 'receber'
-    description: row.description,
-    value: row.value ?? 0,
-    dueDate: row.due_date,
-    category: row.category ?? "",
-    status: row.status ?? "pendente",
-    paymentMethod: row.payment_method ?? undefined,
-    destino: row.destino ?? undefined,
-    origem: row.origem ?? undefined,
-    origemId: row.origem_id ?? undefined,
-    notes: row.notes ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    name: row.name,
+    ansCode: row.ans_code ?? "",
+    type: row.tipo ?? "Médico",
+    repasse: row.repasse ?? "",
+    carencia: row.carencia ?? "",
+    contact: row.contact ?? "",
+    status: row.status ?? "ativo",
+    faturar: row.faturar ?? false,
+    repasseAoFaturar: row.repasse_ao_faturar ?? false,
+    planos: row.planos ?? [],
+    tabelas: row.tabelas ?? [],
   };
 }
 
-function mapAccountToDb(a: any) {
+function mapConvToDb(c: any) {
   return {
-    type: a.type,
-    description: a.description,
-    value: a.value,
-    due_date: a.dueDate,
-    category: a.category ?? null,
-    status: a.status ?? "pendente",
-    payment_method: a.paymentMethod ?? null,
-    destino: a.destino ?? null,
-    origem: a.origem ?? null,
-    origem_id: a.origemId ?? null,
-    notes: a.notes ?? null,
+    name: c.name,
+    tipo: c.type,
+    ans_code: c.ansCode,
+    contact: c.contact,
+    status: c.status,
+    repasse: c.repasse,
+    carencia: c.carencia,
+    faturar: c.faturar ?? false,
+    repasse_ao_faturar: c.repasseAoFaturar ?? false,
+    planos: c.planos ?? [],
+    tabelas: c.tabelas ?? [],
   };
 }
 
-export async function listarContas() {
+export async function listarConvenios() {
   const { data, error } = await supabase
-    .from("accounts")
+    .from("convenios")
     .select("*")
-    .order("due_date", { ascending: false });
+    .order("name");
 
   if (error) {
-    console.error("Erro ao listar contas:", error);
+    console.error("Erro ao listar convênios:", error);
     return [];
   }
-  return (data || []).map(mapAccountFromDb);
+  return (data || []).map(mapConvFromDb);
 }
 
-export async function criarConta(account: any) {
+export async function criarConvenio(conv: any) {
   const { data, error } = await supabase
-    .from("accounts")
-    .insert(mapAccountToDb(account))
+    .from("convenios")
+    .insert(mapConvToDb(conv))
     .select()
     .single();
 
   if (error) {
-    console.error("Erro ao criar conta:", error);
+    console.error("Erro ao criar convênio:", error);
     throw error;
   }
-  return mapAccountFromDb(data);
+  return mapConvFromDb(data);
 }
 
-export async function atualizarConta(id: string, account: any) {
+export async function atualizarConvenio(id: string, conv: any) {
   const { error } = await supabase
-    .from("accounts")
-    .update(mapAccountToDb(account))
+    .from("convenios")
+    .update(mapConvToDb(conv))
     .eq("id", id);
 
   if (error) {
-    console.error("Erro ao atualizar conta:", error);
+    console.error("Erro ao atualizar convênio:", error);
     throw error;
   }
 }
 
-export async function excluirConta(id: string) {
-  const { error } = await supabase.from("accounts").delete().eq("id", id);
+export async function excluirConvenio(id: string) {
+  const { error } = await supabase.from("convenios").delete().eq("id", id);
   if (error) {
-    console.error("Erro ao excluir conta:", error);
+    console.error("Erro ao excluir convênio:", error);
     throw error;
   }
 }
@@ -316,6 +274,39 @@ export async function excluirConta(id: string) {
 /* =========================================
    PROCEDIMENTOS
 ========================================= */
+
+function mapProcFromDb(row: any) {
+  return {
+    id: row.id,
+    name: row.name,
+    tussCode: row.tuss_code ?? "",
+    category: row.category ?? "",
+    durationMin: row.duration_min ?? 30,
+    valorParticular: row.valor_particular != null ? String(row.valor_particular) : "",
+    convenioValores: row.convenio_valores ?? [],
+    valorPorProfissional: row.valor_por_profissional ?? [],
+    status: row.status ?? "ativo",
+    tipoConsulta: row.tipo_consulta ?? false,
+    tipoRetorno: row.tipo_retorno ?? false,
+    prazoRetornoDias: row.prazo_retorno_dias ?? 30,
+  };
+}
+
+function mapProcToDb(p: any) {
+  return {
+    name: p.name,
+    tuss_code: p.tussCode,
+    category: p.category,
+    duration_min: p.durationMin,
+    valor_particular: p.valorParticular === "" ? null : Number(p.valorParticular),
+    convenio_valores: p.convenioValores ?? [],
+    valor_por_profissional: p.valorPorProfissional ?? [],
+    status: p.status,
+    tipo_consulta: p.tipoConsulta ?? false,
+    tipo_retorno: p.tipoRetorno ?? false,
+    prazo_retorno_dias: p.prazoRetornoDias ?? 30,
+  };
+}
 
 export async function listarProcedimentos() {
   const { data, error } = await supabase
@@ -327,5 +318,39 @@ export async function listarProcedimentos() {
     console.error("Erro ao listar procedimentos:", error);
     return [];
   }
-  return data || [];
+  return (data || []).map(mapProcFromDb);
+}
+
+export async function criarProcedimento(proc: any) {
+  const { data, error } = await supabase
+    .from("procedimentos")
+    .insert(mapProcToDb(proc))
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Erro ao criar procedimento:", error);
+    throw error;
+  }
+  return mapProcFromDb(data);
+}
+
+export async function atualizarProcedimento(id: string, proc: any) {
+  const { error } = await supabase
+    .from("procedimentos")
+    .update(mapProcToDb(proc))
+    .eq("id", id);
+
+  if (error) {
+    console.error("Erro ao atualizar procedimento:", error);
+    throw error;
+  }
+}
+
+export async function excluirProcedimento(id: string) {
+  const { error } = await supabase.from("procedimentos").delete().eq("id", id);
+  if (error) {
+    console.error("Erro ao excluir procedimento:", error);
+    throw error;
+  }
 }

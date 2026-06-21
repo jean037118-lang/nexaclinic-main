@@ -30,7 +30,6 @@ import {
   listarProfissionais,
   listarProcedimentos,
   listarAgendamentos,
-  criarConta,
 } from "@/lib/agendaData";
 
 export const Route = createFileRoute("/repasse")({
@@ -242,16 +241,14 @@ Período: ${dateFrom} a ${dateTo}`,
     if (!contaForm.description.trim()) { toast.error("Informe a descrição"); return; }
     const now = new Date().toISOString();
     try {
-      // ✅ Salva direto no Supabase (tabela accounts) em vez de só no localStorage
-      await criarConta({
+      await financialStorage.saveAccount({
+        id: "",
         type: "pagar",
         description: contaForm.description,
         value: contaForm.valorRepasse,
         dueDate: contaForm.dueDate,
         category: "repasse_medico",
         status: "pendente",
-        origem: "repasse_medico",
-        origemId: contaForm.profissionalId || undefined,
         notes: contaForm.notes,
         createdAt: now,
         updatedAt: now,

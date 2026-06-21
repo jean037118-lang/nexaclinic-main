@@ -1,26 +1,35 @@
-// storage para Faturamento (lotes e faturas de convênios) — agora no Supabase
+// storage para Faturamento (lotes e faturas de convênios)
+//
+// Arquitetura: cache em memória (Map) que espelha o Supabase.
+// Leituras (getLotes/getFaturas/etc) são síncronas, lendo do cache.
+// Escritas atualizam o cache imediatamente (UI responde na hora) e
+// disparam a gravação no Supabase em segundo plano.
+//
+// IMPORTANTE: chame `initBillingStorage()` uma vez (ex: no useEffect da
+// página de Faturamento) antes de depender dos dados — ele popula o cache
+// a partir do banco. Sem isso, getLotes()/getFaturas() retornam vazio.
 
 import { supabase } from "@/lib/supabase";
 import type { LoteFaturamento, FaturaConvenio, ItemFaturamento, CreateLoteInput, CreateFaturaInput } from './billing-types';
 
-// ─── Sequenciais ──────────────────────────────────────────────────────────────
-// Conta quantos lotes/faturas já existem no ano para gerar o próximo número.
-async function nextLoteSeq(year: number): Promise<string> {
-  const { count } = await supabase
-    .from("lotes_faturamento")
-    .select("id", { count: "exact", head: true })
-    .like("numero", `${year}/%`);
-  const n = (count ?? 0) + 1;
-  return `${year}/${String(n).padStart(3, '0')}`;
+function uuid(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  // fallback simples caso crypto.randomUUID não esteja disponível
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
-async function nextFaturaSeq(year: number): Promise<string> {
-  const { count } = await supabase
-    .from("faturas_convenio")
-    .select("id", { count: "exact", head: true })
-    .like("numero", `FAT-${year}-%`);
-  const n = (count ?? 0) + 1;
-  return `FAT-${year}-${String(n).padStart(3, '0')}`;
+// ─── Cache ──────────────────────────────────────────────────────────────────
+const lotesCache = new Map<string, LoteFaturamento>();
+const faturasCache = new Map<string, FaturaConvenio>();
+let lotesCarregados = false;
+let faturasCarregadas = false;
+
+function sortByCreatedAtDesc<T extends { createdAt: string }>(arr: T[]): T[] {
+  return [...arr].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
 // ─── Mapeamento Lote ────────────────────────────────────────────────────────
@@ -46,8 +55,9 @@ function mapLoteFromDb(row: any): LoteFaturamento {
   };
 }
 
-function mapLoteToDb(l: Partial<LoteFaturamento>) {
+function mapLoteToDb(l: LoteFaturamento) {
   return {
+    id: l.id,
     convenio_id: l.convenioId,
     convenio_name: l.convenioName,
     ans_code: l.ansCode ?? null,
@@ -63,6 +73,7 @@ function mapLoteToDb(l: Partial<LoteFaturamento>) {
     valor_glosado: l.valorGlosado ?? null,
     observacoes: l.observacoes ?? null,
     items: l.items ?? [],
+    created_at: l.createdAt,
   };
 }
 
@@ -90,8 +101,9 @@ function mapFaturaFromDb(row: any): FaturaConvenio {
   };
 }
 
-function mapFaturaToDb(f: Partial<FaturaConvenio>) {
+function mapFaturaToDb(f: FaturaConvenio) {
   return {
+    id: f.id,
     convenio_id: f.convenioId,
     convenio_name: f.convenioName,
     ans_code: f.ansCode ?? null,
@@ -107,173 +119,186 @@ function mapFaturaToDb(f: Partial<FaturaConvenio>) {
     data_vencimento: f.dataVencimento ?? null,
     protocolo: f.protocolo ?? null,
     observacoes: f.observacoes ?? null,
+    created_at: f.createdAt,
+    updated_at: f.updatedAt,
   };
+}
+
+// ─── Inicialização (popula o cache a partir do Supabase) ────────────────────
+export async function initBillingStorage(): Promise<void> {
+  const [lotesRes, faturasRes] = await Promise.all([
+    supabase.from("lotes_faturamento").select("*"),
+    supabase.from("faturas_convenio").select("*"),
+  ]);
+
+  if (lotesRes.error) {
+    console.error("Erro ao carregar lotes de faturamento:", lotesRes.error);
+  } else {
+    lotesCache.clear();
+    (lotesRes.data || []).forEach((row) => lotesCache.set(row.id, mapLoteFromDb(row)));
+    lotesCarregados = true;
+  }
+
+  if (faturasRes.error) {
+    console.error("Erro ao carregar faturas de convênio:", faturasRes.error);
+  } else {
+    faturasCache.clear();
+    (faturasRes.data || []).forEach((row) => faturasCache.set(row.id, mapFaturaFromDb(row)));
+    faturasCarregadas = true;
+  }
+}
+
+export function billingStorageEstaCarregado(): boolean {
+  return lotesCarregados && faturasCarregadas;
 }
 
 export const billingStorage = {
   // ── Lotes ────────────────────────────────────────────────────────────────────
-  async getLotes(): Promise<LoteFaturamento[]> {
-    const { data, error } = await supabase
-      .from("lotes_faturamento")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) { console.error("Erro ao buscar lotes:", error); return []; }
-    return (data || []).map(mapLoteFromDb);
+  getLotes(): LoteFaturamento[] {
+    return sortByCreatedAtDesc(Array.from(lotesCache.values()));
   },
 
-  async getLote(id: string): Promise<LoteFaturamento | undefined> {
-    const { data, error } = await supabase
-      .from("lotes_faturamento")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-    if (error || !data) return undefined;
-    return mapLoteFromDb(data);
+  getLote(id: string): LoteFaturamento | undefined {
+    return lotesCache.get(id);
   },
 
-  async createLote(input: CreateLoteInput): Promise<LoteFaturamento> {
+  createLote(input: CreateLoteInput): LoteFaturamento {
     const now = new Date();
     const year = now.getFullYear();
-    const rawItems = input.items ?? [];
+    const id = uuid();
 
-    const items: ItemFaturamento[] = rawItems.map(i => ({
+    const items: ItemFaturamento[] = (input.items ?? []).map((i) => ({
       ...i,
       id: `item_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      loteId: '', // preenchido após o insert, quando soubermos o id real
+      loteId: id,
     }));
     const totalValue = items.reduce((s, i) => s + i.totalValue, 0);
-    const numero = await nextLoteSeq(year);
 
-    const { data, error } = await supabase
-      .from("lotes_faturamento")
-      .insert(mapLoteToDb({
-        convenioId: input.convenioId,
-        convenioName: input.convenioName,
-        ansCode: input.ansCode,
-        competencia: input.competencia,
-        numero,
-        status: 'aberto',
-        totalValue,
-        itemCount: items.length,
-        fechadoAt: input.fechadoAt,
-        enviadoAt: input.enviadoAt,
-        pagoAt: input.pagoAt,
-        valorPago: input.valorPago,
-        valorGlosado: input.valorGlosado,
-        observacoes: input.observacoes,
-        items,
-      }))
-      .select()
-      .single();
+    // numeração sequencial baseada no que já está em cache (aproximada — ok p/ uso da clínica)
+    const doAno = this.getLotes().filter((l) => l.numero.startsWith(`${year}/`)).length;
+    const numero = `${year}/${String(doAno + 1).padStart(3, "0")}`;
 
-    if (error) { console.error("Erro ao criar lote:", error); throw error; }
+    const lote: LoteFaturamento = {
+      id,
+      convenioId: input.convenioId,
+      convenioName: input.convenioName,
+      ansCode: input.ansCode,
+      competencia: input.competencia,
+      numero,
+      status: "aberto",
+      totalValue,
+      itemCount: items.length,
+      createdAt: now.toISOString(),
+      fechadoAt: input.fechadoAt,
+      enviadoAt: input.enviadoAt,
+      pagoAt: input.pagoAt,
+      valorPago: input.valorPago,
+      valorGlosado: input.valorGlosado,
+      observacoes: input.observacoes,
+      items,
+    };
 
-    // agora que temos o id real do lote, corrige loteId nos items
-    const finalItems = items.map(i => ({ ...i, loteId: data.id }));
-    const { data: updated, error: updError } = await supabase
-      .from("lotes_faturamento")
-      .update({ items: finalItems })
-      .eq("id", data.id)
-      .select()
-      .single();
-    if (updError) { console.error("Erro ao ajustar itens do lote:", updError); throw updError; }
+    lotesCache.set(id, lote);
 
-    return mapLoteFromDb(updated);
-  },
-
-  async updateLote(id: string, patch: Partial<LoteFaturamento>): Promise<LoteFaturamento> {
-    const updatePayload: any = mapLoteToDb(patch);
-    if (patch.items) {
-      updatePayload.total_value = patch.items.reduce((s, i) => s + i.totalValue, 0);
-      updatePayload.item_count = patch.items.length;
-    }
-    // remove chaves undefined para não sobrescrever campos não enviados
-    Object.keys(updatePayload).forEach((k) => {
-      if (updatePayload[k] === undefined) delete updatePayload[k];
+    supabase.from("lotes_faturamento").insert(mapLoteToDb(lote)).then(({ error }) => {
+      if (error) console.error("Erro ao gravar lote no Supabase:", error);
     });
 
-    const { data, error } = await supabase
-      .from("lotes_faturamento")
-      .update(updatePayload)
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) { console.error("Erro ao atualizar lote:", error); throw error; }
-    return mapLoteFromDb(data);
+    return lote;
   },
 
-  async addItemToLote(loteId: string, item: Omit<ItemFaturamento, 'id' | 'loteId'>): Promise<LoteFaturamento> {
-    const lote = await this.getLote(loteId);
-    if (!lote) throw new Error('Lote não encontrado');
+  updateLote(id: string, patch: Partial<LoteFaturamento>): LoteFaturamento {
+    const atual = lotesCache.get(id);
+    if (!atual) throw new Error("Lote não encontrado");
+    const updated: LoteFaturamento = { ...atual, ...patch };
+    if (patch.items) {
+      updated.totalValue = patch.items.reduce((s, i) => s + i.totalValue, 0);
+      updated.itemCount = patch.items.length;
+    }
+    lotesCache.set(id, updated);
+
+    supabase.from("lotes_faturamento").update(mapLoteToDb(updated)).eq("id", id).then(({ error }) => {
+      if (error) console.error("Erro ao atualizar lote no Supabase:", error);
+    });
+
+    return updated;
+  },
+
+  addItemToLote(loteId: string, item: Omit<ItemFaturamento, "id" | "loteId">): LoteFaturamento {
+    const lote = this.getLote(loteId);
+    if (!lote) throw new Error("Lote não encontrado");
     const newItem: ItemFaturamento = {
       ...item,
       id: `item_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       loteId,
     };
-    const items = [...lote.items, newItem];
-    return this.updateLote(loteId, { items });
+    return this.updateLote(loteId, { items: [...lote.items, newItem] });
   },
 
-  async removeItemFromLote(loteId: string, itemId: string): Promise<LoteFaturamento> {
-    const lote = await this.getLote(loteId);
-    if (!lote) throw new Error('Lote não encontrado');
-    const items = lote.items.filter(i => i.id !== itemId);
-    return this.updateLote(loteId, { items });
+  removeItemFromLote(loteId: string, itemId: string): LoteFaturamento {
+    const lote = this.getLote(loteId);
+    if (!lote) throw new Error("Lote não encontrado");
+    return this.updateLote(loteId, { items: lote.items.filter((i) => i.id !== itemId) });
   },
 
-  async deleteLote(id: string): Promise<void> {
-    const { error } = await supabase.from("lotes_faturamento").delete().eq("id", id);
-    if (error) { console.error("Erro ao excluir lote:", error); throw error; }
+  deleteLote(id: string): void {
+    lotesCache.delete(id);
+    supabase.from("lotes_faturamento").delete().eq("id", id).then(({ error }) => {
+      if (error) console.error("Erro ao excluir lote no Supabase:", error);
+    });
   },
 
   // ── Faturas ────────────────────────────────────────────────────────────────
-  async getFaturas(): Promise<FaturaConvenio[]> {
-    const { data, error } = await supabase
-      .from("faturas_convenio")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) { console.error("Erro ao buscar faturas:", error); return []; }
-    return (data || []).map(mapFaturaFromDb);
+  getFaturas(): FaturaConvenio[] {
+    return sortByCreatedAtDesc(Array.from(faturasCache.values()));
   },
 
-  async createFatura(input: CreateFaturaInput): Promise<FaturaConvenio> {
+  createFatura(input: CreateFaturaInput): FaturaConvenio {
     const now = new Date();
-    const lotes = (await this.getLotes()).filter(l => input.loteIds.includes(l.id));
+    const year = now.getFullYear();
+    const id = uuid();
+    const lotes = this.getLotes().filter((l) => input.loteIds.includes(l.id));
     const totalValue = lotes.reduce((s, l) => s + l.totalValue, 0);
-    const numero = await nextFaturaSeq(now.getFullYear());
 
-    const { data, error } = await supabase
-      .from("faturas_convenio")
-      .insert(mapFaturaToDb({
-        ...input,
-        numero,
-        totalValue,
-        status: input.status ?? 'pendente',
-      }))
-      .select()
-      .single();
-    if (error) { console.error("Erro ao criar fatura:", error); throw error; }
-    return mapFaturaFromDb(data);
-  },
+    const doAno = this.getFaturas().filter((f) => f.numero.startsWith(`FAT-${year}-`)).length;
+    const numero = `FAT-${year}-${String(doAno + 1).padStart(3, "0")}`;
 
-  async updateFatura(id: string, patch: Partial<FaturaConvenio>): Promise<FaturaConvenio> {
-    const updatePayload: any = mapFaturaToDb(patch);
-    Object.keys(updatePayload).forEach((k) => {
-      if (updatePayload[k] === undefined) delete updatePayload[k];
+    const fatura: FaturaConvenio = {
+      ...input,
+      id,
+      numero,
+      totalValue,
+      status: input.status ?? "pendente",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    faturasCache.set(id, fatura);
+    supabase.from("faturas_convenio").insert(mapFaturaToDb(fatura)).then(({ error }) => {
+      if (error) console.error("Erro ao gravar fatura no Supabase:", error);
     });
-    const { data, error } = await supabase
-      .from("faturas_convenio")
-      .update(updatePayload)
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) { console.error("Erro ao atualizar fatura:", error); throw error; }
-    return mapFaturaFromDb(data);
+
+    return fatura;
   },
 
-  async deleteFatura(id: string): Promise<void> {
-    const { error } = await supabase.from("faturas_convenio").delete().eq("id", id);
-    if (error) { console.error("Erro ao excluir fatura:", error); throw error; }
+  updateFatura(id: string, patch: Partial<FaturaConvenio>): FaturaConvenio {
+    const atual = faturasCache.get(id);
+    if (!atual) throw new Error("Fatura não encontrada");
+    const updated: FaturaConvenio = { ...atual, ...patch, updatedAt: new Date().toISOString() };
+    faturasCache.set(id, updated);
+
+    supabase.from("faturas_convenio").update(mapFaturaToDb(updated)).eq("id", id).then(({ error }) => {
+      if (error) console.error("Erro ao atualizar fatura no Supabase:", error);
+    });
+
+    return updated;
+  },
+
+  deleteFatura(id: string): void {
+    faturasCache.delete(id);
+    supabase.from("faturas_convenio").delete().eq("id", id).then(({ error }) => {
+      if (error) console.error("Erro ao excluir fatura no Supabase:", error);
+    });
   },
 };
 
@@ -294,6 +319,9 @@ export interface BillingItem {
   data: string;
 }
 
+const billingItemsCache = new Map<string, BillingItem>();
+let billingItemsCarregados = false;
+
 function mapBillingItemFromDb(row: any): BillingItem {
   return {
     id: row.id,
@@ -309,8 +337,9 @@ function mapBillingItemFromDb(row: any): BillingItem {
   };
 }
 
-function mapBillingItemToDb(i: Partial<BillingItem>) {
+function mapBillingItemToDb(i: BillingItem) {
   return {
+    id: i.id,
     appointment_id: i.appointmentId ?? null,
     convenio_id: i.convenioId,
     convenio_nome: i.convenioNome,
@@ -323,37 +352,46 @@ function mapBillingItemToDb(i: Partial<BillingItem>) {
   };
 }
 
+export async function initBillingItemsStorage(): Promise<void> {
+  const { data, error } = await supabase.from("billing_items").select("*");
+  if (error) {
+    console.error("Erro ao carregar itens de faturamento:", error);
+    return;
+  }
+  billingItemsCache.clear();
+  (data || []).forEach((row) => billingItemsCache.set(row.id, mapBillingItemFromDb(row)));
+  billingItemsCarregados = true;
+}
+
 export const billingItemsStorage = {
-  async getAll(): Promise<BillingItem[]> {
-    const { data, error } = await supabase
-      .from("billing_items")
-      .select("*")
-      .order("data", { ascending: false });
-    if (error) { console.error("Erro ao buscar itens de faturamento:", error); return []; }
-    return (data || []).map(mapBillingItemFromDb);
+  getAll(): BillingItem[] {
+    return Array.from(billingItemsCache.values());
   },
 
-  async add(item: BillingItem): Promise<BillingItem> {
-    const { data, error } = await supabase
-      .from("billing_items")
-      .insert(mapBillingItemToDb(item))
-      .select()
-      .single();
-    if (error) { console.error("Erro ao criar item de faturamento:", error); throw error; }
-    return mapBillingItemFromDb(data);
-  },
-
-  async update(id: string, patch: Partial<BillingItem>): Promise<void> {
-    const updatePayload: any = mapBillingItemToDb(patch);
-    Object.keys(updatePayload).forEach((k) => {
-      if (updatePayload[k] === undefined) delete updatePayload[k];
+  add(item: BillingItem): BillingItem {
+    const id = item.id || uuid();
+    const saved = { ...item, id };
+    billingItemsCache.set(id, saved);
+    supabase.from("billing_items").insert(mapBillingItemToDb(saved)).then(({ error }) => {
+      if (error) console.error("Erro ao gravar item de faturamento no Supabase:", error);
     });
-    const { error } = await supabase.from("billing_items").update(updatePayload).eq("id", id);
-    if (error) { console.error("Erro ao atualizar item de faturamento:", error); throw error; }
+    return saved;
   },
 
-  async remove(id: string): Promise<void> {
-    const { error } = await supabase.from("billing_items").delete().eq("id", id);
-    if (error) { console.error("Erro ao excluir item de faturamento:", error); throw error; }
+  update(id: string, patch: Partial<BillingItem>): void {
+    const atual = billingItemsCache.get(id);
+    if (!atual) return;
+    const updated = { ...atual, ...patch };
+    billingItemsCache.set(id, updated);
+    supabase.from("billing_items").update(mapBillingItemToDb(updated)).eq("id", id).then(({ error }) => {
+      if (error) console.error("Erro ao atualizar item de faturamento no Supabase:", error);
+    });
+  },
+
+  remove(id: string): void {
+    billingItemsCache.delete(id);
+    supabase.from("billing_items").delete().eq("id", id).then(({ error }) => {
+      if (error) console.error("Erro ao excluir item de faturamento no Supabase:", error);
+    });
   },
 };

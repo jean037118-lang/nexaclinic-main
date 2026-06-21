@@ -133,21 +133,26 @@ export function useFinancial() {
   const [error, setError]                   = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      // ✅ Garante arrays mesmo que storage retorne null/objeto (ex: Supabase ou
-      // localStorage corrompido), prevenindo "r is not iterable" no useMemo de accounts.
-      const rawAccounts = financialStorage.getAccounts();
-      const rawCommissions = financialStorage.getCommissions();
-      setManualAccounts(Array.isArray(rawAccounts) ? rawAccounts : []);
-      setCommissions(Array.isArray(rawCommissions) ? rawCommissions : []);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao carregar dados');
-      setManualAccounts([]);
-      setCommissions([]);
-    } finally {
-      setLoading(false);
+    async function carregar() {
+      try {
+        // ✅ financialStorage agora é assíncrono (Supabase) — precisa de await,
+        // senão recebemos a Promise em vez do array e quebra o .map/.filter adiante.
+        const [rawAccounts, rawCommissions] = await Promise.all([
+          financialStorage.getAccounts(),
+          financialStorage.getCommissions(),
+        ]);
+        setManualAccounts(Array.isArray(rawAccounts) ? rawAccounts : []);
+        setCommissions(Array.isArray(rawCommissions) ? rawCommissions : []);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Erro ao carregar dados');
+        setManualAccounts([]);
+        setCommissions([]);
+      } finally {
+        setLoading(false);
+      }
     }
+    carregar();
   }, []);
 
   // Agendamentos pagos → accounts virtuais (com destino calculado)
@@ -257,7 +262,7 @@ export function useFinancial() {
   );
 
   // ── CRUD contas manuais ────────────────────────────────────────────────────
-  const createAccount = useCallback((data: CreateAccountInput) => {
+  const createAccount = useCallback(async (data: CreateAccountInput) => {
     try {
       // Garante que contas manuais recebidas também têm destino calculado
       const destino = data.destino ?? (
@@ -269,12 +274,12 @@ export function useFinancial() {
         ...data,
         destino,
         origem: 'manual',
-        id:        `account_${Date.now()}`,
+        id:        '', // gerado pelo Supabase (uuid)
         status:    data.status ?? 'pendente',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      const saved = financialStorage.saveAccount(newAccount);
+      const saved = await financialStorage.saveAccount(newAccount);
       setManualAccounts((prev) => [...prev, saved]);
       return saved;
     } catch (err) {
@@ -284,10 +289,10 @@ export function useFinancial() {
     }
   }, []);
 
-  const updateAccount = useCallback((accountId: string, updates: UpdateAccountInput) => {
+  const updateAccount = useCallback(async (accountId: string, updates: UpdateAccountInput) => {
     if (accountId.startsWith('appt_')) return; // imutável — veio da agenda
     try {
-      const all = financialStorage.getAccounts();
+      const all = await financialStorage.getAccounts();
       const idx = all.findIndex((a) => a.id === accountId);
       if (idx === -1) throw new Error('Conta não encontrada');
 
@@ -305,7 +310,7 @@ export function useFinancial() {
         createdAt: all[idx].createdAt,
         updatedAt: new Date().toISOString(),
       };
-      const saved = financialStorage.saveAccount(updated);
+      const saved = await financialStorage.saveAccount(updated);
       setManualAccounts((prev) => prev.map((a) => (a.id === accountId ? saved : a)));
       return saved;
     } catch (err) {
@@ -315,10 +320,10 @@ export function useFinancial() {
     }
   }, []);
 
-  const deleteAccount = useCallback((accountId: string) => {
+  const deleteAccount = useCallback(async (accountId: string) => {
     if (accountId.startsWith('appt_')) return;
     try {
-      financialStorage.deleteAccount(accountId);
+      await financialStorage.deleteAccount(accountId);
       setManualAccounts((prev) => prev.filter((a) => a.id !== accountId));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erro ao deletar conta';
@@ -334,15 +339,15 @@ export function useFinancial() {
 
   // ── CRUD comissões ─────────────────────────────────────────────────────────
   const createCommission = useCallback(
-    (data: Omit<MedicalCommission, 'id' | 'createdAt' | 'updatedAt'>) => {
+    async (data: Omit<MedicalCommission, 'id' | 'createdAt' | 'updatedAt'>) => {
       try {
         const newC: MedicalCommission = {
           ...data,
-          id:        `commission_${Date.now()}`,
+          id:        '', // gerado pelo Supabase (uuid)
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        const saved = financialStorage.saveCommission(newC);
+        const saved = await financialStorage.saveCommission(newC);
         setCommissions((prev) => [...prev, saved]);
         return saved;
       } catch (err) {
@@ -353,9 +358,9 @@ export function useFinancial() {
     []
   );
 
-  const updateCommission = useCallback((id: string, updates: Partial<MedicalCommission>) => {
+  const updateCommission = useCallback(async (id: string, updates: Partial<MedicalCommission>) => {
     try {
-      const all = financialStorage.getCommissions();
+      const all = await financialStorage.getCommissions();
       const idx = all.findIndex((c) => c.id === id);
       if (idx === -1) throw new Error('Comissão não encontrada');
       const updated: MedicalCommission = {
@@ -365,7 +370,7 @@ export function useFinancial() {
         createdAt: all[idx].createdAt,
         updatedAt: new Date().toISOString(),
       };
-      const saved = financialStorage.saveCommission(updated);
+      const saved = await financialStorage.saveCommission(updated);
       setCommissions((prev) => prev.map((c) => (c.id === id ? saved : c)));
       return saved;
     } catch (err) {
@@ -374,9 +379,9 @@ export function useFinancial() {
     }
   }, []);
 
-  const deleteCommission = useCallback((id: string) => {
+  const deleteCommission = useCallback(async (id: string) => {
     try {
-      financialStorage.deleteCommission(id);
+      await financialStorage.deleteCommission(id);
       setCommissions((prev) => prev.filter((c) => c.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao deletar comissão');

@@ -1,0 +1,9 @@
+{
+  "_comentario": "Gerado pelo setup.js — NÃO compartilhe este arquivo",
+  "supabase_url": "https://SEU-PROJETO.supabase.co",
+  "supabase_service_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "empresa_id": "uuid-da-sua-empresa-no-supabase",
+  "db_path": "C:\\NexaClinic\\backup\\backup-atual.db",
+  "intervalo_minutos": 30,
+  "log_level": "info"
+}

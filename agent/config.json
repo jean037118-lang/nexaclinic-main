@@ -1,0 +1,7 @@
+{
+  "supabase_url": "https://yrbqoeulexucxzladdoz.supabase.co",
+  "supabase_service_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlyYnFvZXVsZXh1Y3h6bGFkZG96Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTk5ODcxNCwiZXhwIjoyMDk3NTc0NzE0fQ.sfiJFbiJ3534sKQxXFxNSUdd8R9ITPJH8haGWhq8K5M",
+  "empresa_id": "97b18cf6-7d82-4c53-9331-42ff30c8d5b9",
+  "db_path": "C:\\Users\\José\\AppData\\Roaming\\tanstack_start_ts\\database.db",
+  "intervalo_minutos": 30
+}

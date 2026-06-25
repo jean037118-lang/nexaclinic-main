@@ -3,42 +3,73 @@ import { useSpecialty } from '@/store/useSpecialty'
 import { specialtyStore } from '@/store/useSpecialty'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Pencil, Trash2, Check, X, Plus, Stethoscope } from 'lucide-react'
+import { Pencil, Trash2, Check, X, Plus, Stethoscope, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export function EspecialidadeForm() {
-  const [name, setName] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [name, setName]               = useState('')
+  const [saving, setSaving]           = useState(false)
+  const [editingId, setEditingId]     = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
-  const { specialties, addSpecialty } = useSpecialty()
+  const [editSaving, setEditSaving]   = useState(false)
 
-  function handleAdd() {
+  const { specialties, loading, addSpecialty, refresh } = useSpecialty()
+
+  // ── Criar ──────────────────────────────────────────────────────────────────
+  async function handleAdd() {
     const trimmed = name.trim()
     if (!trimmed) return
+
     const dup = specialties.find(s => s.name.toLowerCase() === trimmed.toLowerCase())
     if (dup) { toast.error('Especialidade já cadastrada.'); return }
-    addSpecialty({ id: crypto.randomUUID(), name: trimmed })
-    setName('')
-    toast.success(`Especialidade "${trimmed}" criada.`)
+
+    setSaving(true)
+    const ok = await addSpecialty({ id: crypto.randomUUID(), name: trimmed })
+    setSaving(false)
+
+    if (ok) {
+      setName('')
+      toast.success(`Especialidade "${trimmed}" criada.`)
+    } else {
+      toast.error('Erro ao salvar no banco. Verifique a conexão.')
+    }
   }
 
-  function handleEdit(id: string) {
+  // ── Editar ─────────────────────────────────────────────────────────────────
+  async function handleEdit(id: string) {
     const trimmed = editingName.trim()
     if (!trimmed) { toast.error('Informe o nome'); return }
-    const dup = specialties.find(s => s.name.toLowerCase() === trimmed.toLowerCase() && s.id !== id)
+
+    const dup = specialties.find(
+      s => s.name.toLowerCase() === trimmed.toLowerCase() && s.id !== id
+    )
     if (dup) { toast.error('Já existe uma especialidade com esse nome.'); return }
-    const updated = specialties.map(s => s.id === id ? { ...s, name: trimmed } : s)
-    localStorage.setItem('nexaclinic_specialties_store', JSON.stringify(updated))
-    window.dispatchEvent(new CustomEvent('nexaclinic:specialties-changed'))
-    setEditingId(null)
-    toast.success('Especialidade atualizada.')
+
+    setEditSaving(true)
+    const ok = await specialtyStore.update(id, trimmed)
+    setEditSaving(false)
+
+    if (ok) {
+      await refresh()
+      setEditingId(null)
+      toast.success('Especialidade atualizada.')
+    } else {
+      toast.error('Erro ao atualizar no banco.')
+    }
   }
 
-  function handleDelete(id: string, nome: string) {
-    specialtyStore.remove(id)
-    toast.success(`Especialidade "${nome}" removida.`)
+  // ── Excluir ────────────────────────────────────────────────────────────────
+  async function handleDelete(id: string, nome: string) {
+    const ok = await specialtyStore.remove(id)
+    if (ok) {
+      await refresh()
+      toast.success(`Especialidade "${nome}" removida.`)
+    } else {
+      toast.error('Erro ao remover no banco.')
+    }
   }
 
+  // ── UI ─────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6 p-6 max-w-xl">
       <div>
@@ -55,16 +86,30 @@ export function EspecialidadeForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
+          disabled={saving}
           className="flex-1"
         />
-        <Button onClick={handleAdd} className="gap-1.5 bg-gradient-to-r from-cyan-600 to-teal-600 text-white hover:from-cyan-700 hover:to-teal-700 shadow-sm">
-          <Plus className="h-4 w-4" /> Criar
+        <Button
+          onClick={handleAdd}
+          disabled={saving || !name.trim()}
+          className="gap-1.5 bg-gradient-to-r from-cyan-600 to-teal-600 text-white hover:from-cyan-700 hover:to-teal-700 shadow-sm"
+        >
+          {saving
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : <Plus className="h-4 w-4" />
+          }
+          {saving ? 'Salvando…' : 'Criar'}
         </Button>
       </div>
 
       {/* Lista */}
       <div className="space-y-2">
-        {specialties.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-14 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Carregando especialidades…</span>
+          </div>
+        ) : specialties.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-14 text-center text-muted-foreground">
             <Stethoscope className="h-10 w-10 opacity-20" />
             <p className="text-sm">Nenhuma especialidade cadastrada.</p>
@@ -88,12 +133,26 @@ export function EspecialidadeForm() {
                       if (e.key === 'Enter') handleEdit(s.id)
                       if (e.key === 'Escape') setEditingId(null)
                     }}
+                    disabled={editSaving}
                     autoFocus
                   />
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:bg-green-50" onClick={() => handleEdit(s.id)}>
-                    <Check className="h-3.5 w-3.5" />
+                  <Button
+                    size="icon" variant="ghost"
+                    className="h-7 w-7 text-green-600 hover:bg-green-50"
+                    onClick={() => handleEdit(s.id)}
+                    disabled={editSaving}
+                  >
+                    {editSaving
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <Check className="h-3.5 w-3.5" />
+                    }
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground" onClick={() => setEditingId(null)}>
+                  <Button
+                    size="icon" variant="ghost"
+                    className="h-7 w-7 text-muted-foreground"
+                    onClick={() => setEditingId(null)}
+                    disabled={editSaving}
+                  >
                     <X className="h-3.5 w-3.5" />
                   </Button>
                 </>
@@ -101,13 +160,15 @@ export function EspecialidadeForm() {
                 <>
                   <span className="flex-1 text-sm font-medium">{s.name}</span>
                   <Button
-                    size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-primary"
+                    size="icon" variant="ghost"
+                    className="h-7 w-7 text-muted-foreground hover:text-primary"
                     onClick={() => { setEditingId(s.id); setEditingName(s.name) }}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button
-                    size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    size="icon" variant="ghost"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
                     onClick={() => handleDelete(s.id, s.name)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />

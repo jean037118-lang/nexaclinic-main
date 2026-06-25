@@ -16,11 +16,18 @@ function mapProfFromDb(row: any) {
     workDays: row.work_days ?? "",
     repasseType: row.repasse_type ?? "",
     repasseValue: row.repasse_value ?? 0,
-    // Campos abaixo não existem na tabela ainda — mantidos por compatibilidade
-    // com telas que esperam horário de atendimento. Ajuste se/quando forem
-    // adicionados como colunas no Supabase.
     scheduleStart: row.schedule_start ?? "08:00",
     scheduleEnd: row.schedule_end ?? "18:00",
+    // Campos extras salvos no banco
+    repasseRegras: row.repasse_regras ?? [],
+    repasseSomenteComPagamento: row.repasse_somente_com_pagamento ?? true,
+    avatar: row.avatar ?? "",
+    tipo: row.tipo ?? "profissional",
+    agendaTipo: row.agenda_tipo ?? "permanente",
+    diasSemana: row.dias_semana ?? [1, 2, 3, 4, 5],
+    datasEspecificas: row.datas_especificas ?? [],
+    prazoRetornoDias: row.prazo_retorno_dias ?? 30,
+    observacao: row.observacao ?? "",
   };
 }
 
@@ -35,6 +42,18 @@ function mapProfToDb(p: any) {
     work_days: p.workDays,
     repasse_type: p.repasseType,
     repasse_value: p.repasseValue,
+    // Campos que estavam faltando — agora enviados ao Supabase
+    schedule_start: p.scheduleStart ?? "08:00",
+    schedule_end: p.scheduleEnd ?? "18:00",
+    repasse_regras: p.repasseRegras ?? [],
+    repasse_somente_com_pagamento: p.repasseSomenteComPagamento ?? true,
+    avatar: p.avatar ?? "",
+    tipo: p.tipo ?? "profissional",
+    agenda_tipo: p.agendaTipo ?? "permanente",
+    dias_semana: p.diasSemana ?? [1, 2, 3, 4, 5],
+    datas_especificas: p.datasEspecificas ?? [],
+    prazo_retorno_dias: p.prazoRetornoDias ?? 30,
+    observacao: p.observacao ?? "",
   };
 }
 

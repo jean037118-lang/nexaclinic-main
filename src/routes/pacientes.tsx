@@ -5,8 +5,9 @@ import {
   Plus, Search, Phone, Mail, Pencil, Trash2, CheckCircle2, AlertCircle,
   FileText, Calendar, Clock, ChevronDown, ChevronUp, Camera, Upload,
   X, Download, Eye, AlertTriangle, User, CreditCard, MapPin, Heart,
-  DollarSign, Paperclip, ImageIcon, History, Activity,
+  DollarSign, Paperclip, ImageIcon, History, Activity, RefreshCw,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { Card }   from "@/components/ui/card";
 import { Input }  from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -185,6 +186,65 @@ function PacientesPage() {
     return true;
   }), [enriched, q, filtro]);
 
+  const [syncing, setSyncing] = useState(false);
+
+  const [syncProgress, setSyncProgress] = useState<{ atual: number; total: number } | null>(null);
+
+  async function handleSync() {
+    const todos = patientStore.getAll();
+    if (todos.length === 0) { toast.info("Nenhum paciente para sincronizar."); return; }
+
+    const LOTE = 50; // pacientes por requisição
+    const rows = todos.map((p: any) => {
+      const { _alerta, ...rest } = p;
+      return rest;
+    });
+    const lotes = Array.from({ length: Math.ceil(rows.length / LOTE) }, (_, i) =>
+      rows.slice(i * LOTE, i * LOTE + LOTE)
+    );
+
+    setSyncing(true);
+    setSyncProgress({ atual: 0, total: rows.length });
+
+    const toastId = toast.loading(`Importando pacientes… 0 / ${rows.length}`);
+    let importados = 0;
+    const erros: string[] = [];
+
+    try {
+      for (const lote of lotes) {
+        const { error } = await supabase
+          .from("patients")          // ← ajuste se o nome da sua tabela for diferente
+          .upsert(lote, { onConflict: "id" });
+
+        if (error) {
+          erros.push(error.message);
+        } else {
+          importados += lote.length;
+        }
+
+        setSyncProgress({ atual: importados, total: rows.length });
+        toast.loading(`Importando pacientes… ${importados} / ${rows.length}`, { id: toastId });
+      }
+
+      if (erros.length === 0) {
+        registrarAuditoria("SYNC_PACIENTES", `${importados} paciente(s) sincronizado(s) com Supabase`);
+        toast.success(`${importados} paciente(s) importado(s) com sucesso!`, { id: toastId });
+      } else {
+        toast.warning(
+          `${importados} importado(s). ${erros.length} lote(s) com erro — verifique o console.`,
+          { id: toastId }
+        );
+        console.error("Erros por lote:", erros);
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Erro inesperado: ${err?.message ?? "verifique o console"}`, { id: toastId });
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
+    }
+  }
+
   function openCreate() { setEditingPat(null); setFormOpen(true); }
   function openEdit(p: Patient) { setEditingPat(p); setFormOpen(true); }
 
@@ -210,9 +270,33 @@ function PacientesPage() {
           <h1 className="text-3xl font-bold tracking-tight text-slate-800">Pacientes</h1>
           <p className="text-sm text-slate-400 mt-0.5">{patients.length} cadastrado(s)</p>
         </div>
-        <Button onClick={openCreate} className="bg-cyan-600 hover:bg-cyan-700 text-white gap-2 shadow-sm">
-          <Plus className="h-4 w-4" /> Novo paciente
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleSync}
+            disabled={syncing}
+            variant="outline"
+            className="relative gap-2 border-cyan-200 text-cyan-700 hover:bg-cyan-50 overflow-hidden min-w-[220px]"
+          >
+            {/* barra de progresso preenchendo o fundo do botão */}
+            {syncProgress && (
+              <span
+                className="absolute inset-0 bg-cyan-100 transition-all duration-300"
+                style={{ width: `${Math.round((syncProgress.atual / syncProgress.total) * 100)}%` }}
+              />
+            )}
+            <span className="relative flex items-center gap-2">
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncProgress
+                ? `${syncProgress.atual} / ${syncProgress.total} pacientes…`
+                : syncing
+                  ? "Sincronizando…"
+                  : "Sincronizar com Supabase"}
+            </span>
+          </Button>
+          <Button onClick={openCreate} className="bg-cyan-600 hover:bg-cyan-700 text-white gap-2 shadow-sm">
+            <Plus className="h-4 w-4" /> Novo paciente
+          </Button>
+        </div>
       </div>
 
       {/* ── Filtros ───────────────────────────────────────────────── */}

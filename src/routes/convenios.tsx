@@ -6,6 +6,7 @@ import {
   criarConvenio,
   atualizarConvenio,
   excluirConvenio,
+  listarProcedimentos,
 } from "@/lib/agendaData";
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
@@ -91,64 +92,7 @@ export interface Convenio {
   tabelas: TabelaPreco[];
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// STORAGE
-// ═══════════════════════════════════════════════════════════════════════════
-const STORAGE_KEY = "nexaclinic_convenios_v2";
-
-const DEFAULTS: Convenio[] = [
-  {
-    id: "conv1", name: "Unimed", ansCode: "305-2", type: "Médico",
-    repasse: "60", carencia: "30", contact: "0800 722 4848", status: "ativo", faturar: true,
-    planos: [
-      { id: "pl1a", nome: "Unimed Nacional",    codigo: "UN001", abrangencia: "Nacional",  ativo: true },
-      { id: "pl1b", nome: "Unimed Apartamento", codigo: "UN002", abrangencia: "Regional",  ativo: true },
-      { id: "pl1c", nome: "Unimed Enfermaria",  codigo: "UN003", abrangencia: "Local",     ativo: true },
-    ],
-    tabelas: [
-      {
-        id: "tab1", planoId: "pl1a", nome: "CBHPM 2024 – Nacional",
-        vigenciaInicio: "2024-01-01", vigenciaFim: "2024-12-31", ativo: true,
-        itens: [
-          { id: "it1", codigoTUSS: "10101012", procedimento: "Consulta Clínica",  categoria: "Consulta", valor: 180 },
-          { id: "it2", codigoTUSS: "10101039", procedimento: "Retorno",           categoria: "Consulta", valor: 100 },
-          { id: "it3", codigoTUSS: "40302361", procedimento: "Eletrocardiograma", categoria: "Exame",    valor: 90  },
-        ],
-      },
-    ],
-  },
-  {
-    id: "conv2", name: "Bradesco Saúde", ansCode: "005-4", type: "Médico",
-    repasse: "55", carencia: "60", contact: "0800 701 2525", status: "ativo", faturar: false,
-    planos: [
-      { id: "pl2a", nome: "Top Nacional",  codigo: "BS001", abrangencia: "Nacional", ativo: true },
-      { id: "pl2b", nome: "Efetivo",       codigo: "BS002", abrangencia: "Regional", ativo: true },
-    ],
-    tabelas: [],
-  },
-  {
-    id: "conv3", name: "SulAmérica", ansCode: "006-2", type: "Médico",
-    repasse: "58", carencia: "30", contact: "4004 4415", status: "ativo", faturar: false,
-    planos: [],
-    tabelas: [],
-  },
-];
-
-function readConvenios(): Convenio[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved) as Convenio[];
-      // garante campos novos em registros antigos
-      return parsed.map((c) => ({ planos: [], tabelas: [], ...c }));
-    }
-    return DEFAULTS;
-  } catch { return DEFAULTS; }
-}
-
-function saveConvenios(list: Convenio[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
+// ── Storage removido: dados agora vêm exclusivamente do Supabase ──────────────
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function fmtBRL(v: number) {
@@ -862,12 +806,10 @@ function DetalheConvenio({
 // Tenta casar pelo procedimentoId já definido, depois por código TUSS, depois por nome.
 // Retorna o item com procedimentoId preenchido (ou inalterado se não encontrou).
 function autoVincularProcedimento(
-  item: Omit<ItemTabelaPreco, "id"> & { id?: string }
+  item: Omit<ItemTabelaPreco, "id"> & { id?: string },
+  procs: { id: string; name: string; tussCode: string; category: string }[]
 ): typeof item {
   try {
-    const procs: { id: string; name: string; tussCode: string; category: string }[] =
-      JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
-
     if (!procs.length) return item;
 
     // 1. Já tem vínculo? valida se ainda existe
@@ -915,12 +857,19 @@ function TabelaPrecoView({
   const [procSuggestions, setProcSuggestions] = useState<{ id: string; name: string; tussCode: string; category: string }[]>([]);
   const [showProcSugg, setShowProcSugg] = useState(false);
 
-  const allProcedimentos = useMemo(() => {
-    try {
-      const saved = localStorage.getItem("nexaclinic_procedimentos");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  }, [itemOpen]);
+  const [allProcedimentos, setAllProcedimentos] = useState<{ id: string; name: string; tussCode: string; category: string }[]>([]);
+
+  // Carrega procedimentos do Supabase para autocomplete e vínculo
+  useEffect(() => {
+    listarProcedimentos().then((lista) => {
+      setAllProcedimentos(lista.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        tussCode: p.tussCode ?? "",
+        category: p.category ?? "",
+      })));
+    }).catch(() => {});
+  }, []);
   const [importLog, setImportLog] = useState<{ ok: number; erro: number; msgs: string[] } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -959,7 +908,7 @@ function TabelaPrecoView({
     const valor = parseFloat(itemForm.valor.replace(",", "."));
     if (isNaN(valor) || valor < 0) { toast.error("Valor inválido"); return; }
 
-    const formVinculado = autoVincularProcedimento({ ...itemForm, valor });
+    const formVinculado = autoVincularProcedimento({ ...itemForm, valor }, allProcedimentos);
 
     if (editItem) {
       setItens((prev) => prev.map((i) => i.id === editItem.id ? { ...i, ...formVinculado } : i));
@@ -1066,7 +1015,7 @@ function TabelaPrecoView({
             procedimento: proc,
             categoria:   colCat >= 0 ? String(row[colCat] ?? "").trim() || "Consulta" : "Consulta",
             valor,
-          }));
+          }, allProcedimentos));
         }
 
         setImportLog({ ok: novos.length, erro: erros.length, msgs: erros });
@@ -1146,7 +1095,7 @@ function TabelaPrecoView({
               let vinculados = 0;
               setItens((prev) => prev.map((item) => {
                 if (item.procedimentoId) return item; // já vinculado
-                const novo = autoVincularProcedimento(item);
+                const novo = autoVincularProcedimento(item, allProcedimentos);
                 if (novo.procedimentoId) vinculados++;
                 return novo;
               }));

@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { patientStore } from "@/lib/patient-store";
 import { type Patient } from "@/lib/mock-data";
 import { CadastroCompletoDialog } from "@/components/CadastroCompletoDialog";
+import { ImportarPacientesDialog } from "@/components/ImportarPacientesDialog";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface AppointmentExt {
@@ -158,8 +159,9 @@ function PacientesPage() {
   const [q, setQ]           = useState("");
   const [filtro, setFiltro] = useState<"todos" | "ativo" | "inativo" | "alerta">("todos");
   const [patients, setPatients] = useState<Patient[]>(() => patientStore.getAll());
-  const [formOpen, setFormOpen]     = useState(false);
-  const [editingPat, setEditingPat] = useState<Patient | null>(null);
+  const [formOpen, setFormOpen]       = useState(false);
+  const [importOpen, setImportOpen]   = useState(false);
+  const [editingPat, setEditingPat]   = useState<Patient | null>(null);
   const [deleteId, setDeleteId]     = useState<string | null>(null);
   const [perfilPat, setPerfilPat]   = useState<Patient | null>(null);
 
@@ -210,9 +212,14 @@ function PacientesPage() {
           <h1 className="text-3xl font-bold tracking-tight text-slate-800">Pacientes</h1>
           <p className="text-sm text-slate-400 mt-0.5">{patients.length} cadastrado(s)</p>
         </div>
-        <Button onClick={openCreate} className="bg-cyan-600 hover:bg-cyan-700 text-white gap-2 shadow-sm">
-          <Plus className="h-4 w-4" /> Novo paciente
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setImportOpen(true)} variant="outline" className="gap-2 border-cyan-200 text-cyan-700 hover:bg-cyan-50">
+            <Upload className="h-4 w-4" /> Importar planilha
+          </Button>
+          <Button onClick={openCreate} className="bg-cyan-600 hover:bg-cyan-700 text-white gap-2 shadow-sm">
+            <Plus className="h-4 w-4" /> Novo paciente
+          </Button>
+        </div>
       </div>
 
       {/* ── Filtros ───────────────────────────────────────────────── */}
@@ -369,6 +376,13 @@ function PacientesPage() {
           handleAvatarSave(id, b64);
           setPerfilPat(prev => prev ? { ...prev, avatar: b64 } as any : null);
         }}
+      />
+
+      {/* ── Importar planilha ────────────────────────────────────── */}
+      <ImportarPacientesDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onConcluido={() => setPatients(patientStore.getAll())}
       />
 
       {/* ── Cadastro / edição ─────────────────────────────────────── */}

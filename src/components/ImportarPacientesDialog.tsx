@@ -84,7 +84,7 @@ function parsearPlanilha(file: File): Promise<Row[]> {
 
 function mapearLinhas(raw: Row[]): Row[] {
   return raw.map((r) => {
-    const mapped: Row = { id: uuid(), status: "ativo", createdAt: new Date().toISOString() };
+    const mapped: Row = { id: uuid(), created_at: new Date().toISOString() };
     for (const [orig, val] of Object.entries(r)) {
       const campo = CAMPO_MAP[normKey(orig)];
       if (campo) mapped[campo] = val ?? "";
@@ -103,8 +103,9 @@ async function enviarLotes(rows: Row[], onProgresso: (n: number) => void) {
   for (let i = 0; i < rows.length; i += LOTE) {
     const lote = rows.slice(i, i + LOTE);
     const { error } = await supabase
-      .from("patientes")       // ← ajuste se o nome da tabela for diferente
-      .insert(lote);          // insert (não upsert) — são todos novos
+    const { error } = await supabase
+      .from("pacientes")
+      .insert(lote);
 
     if (error) {
       erros.push(`Lote ${Math.floor(i / LOTE) + 1}: ${error.message}`);

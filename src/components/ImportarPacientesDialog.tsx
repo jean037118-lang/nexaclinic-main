@@ -103,7 +103,6 @@ async function enviarLotes(rows: Row[], onProgresso: (n: number) => void) {
   for (let i = 0; i < rows.length; i += LOTE) {
     const lote = rows.slice(i, i + LOTE);
     const { error } = await supabase
-    const { error } = await supabase
       .from("pacientes")
       .insert(lote);
 

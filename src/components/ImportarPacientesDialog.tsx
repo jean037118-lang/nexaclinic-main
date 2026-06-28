@@ -81,7 +81,7 @@ function parsearPlanilha(file: File): Promise<Row[]> {
 
 function mapearLinhas(raw: Row[]): Row[] {
   return raw.map((r) => {
-    const mapped: Row = { id: uuid(), status: "ativo", createdAt: new Date().toISOString() };
+    const mapped: Row = { id: uuid(), created_at: new Date().toISOString() };
     for (const [orig, val] of Object.entries(r)) {
       const campo = CAMPO_MAP[normKey(orig)];
       if (campo) mapped[campo] = val ?? "";

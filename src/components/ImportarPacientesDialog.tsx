@@ -26,9 +26,12 @@ const CAMPO_MAP: Record<string, string> = {
   // sexo
   sexo: "sexo", genero: "sexo", gênero: "sexo",
   // estado civil
-  "estado civil": "estadoCivil", estadocivil: "estadoCivil",
+  "estado civil": "estado_civil", estadocivil: "estado_civil", "estadocivil": "estado_civil",
   // profissão
   profissao: "profissao", profissão: "profissao",
+  // nome mãe / pai
+  "nome mae": "nome_mae", "nome da mae": "nome_mae", mae: "nome_mae",
+  "nome pai": "nome_pai", "nome do pai": "nome_pai", pai: "nome_pai",
   // telefone
   telefone: "phone", celular: "phone", fone: "phone", phone: "phone",
   "telefone 2": "telefone2", telefone2: "telefone2",
@@ -43,10 +46,10 @@ const CAMPO_MAP: Record<string, string> = {
   estado: "estado", uf: "estado",
   // convênio
   convenio: "insurance", convênio: "insurance", plano: "insurance", insurance: "insurance",
-  "numero carteirinha": "convenioNumero", "nº carteirinha": "convenioNumero",
-  "validade convenio": "convenioValidade",
+  "numero carteirinha": "convenio_numero", "nº carteirinha": "convenio_numero",
+  "validade convenio": "convenio_validade", "validade convênio": "convenio_validade",
   // saúde
-  "tipo sanguineo": "tipoSanguineo", "tipo sanguíneo": "tipoSanguineo",
+  "tipo sanguineo": "tipo_sanguineo", "tipo sanguíneo": "tipo_sanguineo",
   alergias: "alergias",
   medicamentos: "medicamentos",
   doencas: "doencas", doenças: "doencas",
@@ -81,7 +84,7 @@ function parsearPlanilha(file: File): Promise<Row[]> {
 
 function mapearLinhas(raw: Row[]): Row[] {
   return raw.map((r) => {
-    const mapped: Row = { id: uuid(), created_at: new Date().toISOString() };
+    const mapped: Row = { id: uuid(), status: "ativo", createdAt: new Date().toISOString() };
     for (const [orig, val] of Object.entries(r)) {
       const campo = CAMPO_MAP[normKey(orig)];
       if (campo) mapped[campo] = val ?? "";
@@ -100,8 +103,8 @@ async function enviarLotes(rows: Row[], onProgresso: (n: number) => void) {
   for (let i = 0; i < rows.length; i += LOTE) {
     const lote = rows.slice(i, i + LOTE);
     const { error } = await supabase
-      .from("pacientes")
-      .insert(lote);
+      .from("patientes")       // ← ajuste se o nome da tabela for diferente
+      .insert(lote);          // insert (não upsert) — são todos novos
 
     if (error) {
       erros.push(`Lote ${Math.floor(i / LOTE) + 1}: ${error.message}`);

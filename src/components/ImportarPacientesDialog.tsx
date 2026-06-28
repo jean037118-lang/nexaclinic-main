@@ -82,17 +82,71 @@ function parsearPlanilha(file: File): Promise<Row[]> {
   });
 }
 
+// ─── Normalizadores para CHECK constraints do Supabase ───────────────────────
+
+const ESTADO_CIVIL_MAP: Record<string, string> = {
+  solteiro: "solteiro", solteira: "solteiro",
+  casado: "casado", casada: "casado",
+  divorciado: "divorciado", divorciada: "divorciado",
+  viuvo: "viuvo", viuvo: "viuvo", viuva: "viuvo",
+  "uniao estavel": "uniao_estavel", "uniao_estavel": "uniao_estavel",
+  "uniao enstavel": "uniao_estavel",
+};
+
+const SEXO_MAP: Record<string, string> = {
+  masculino: "masculino", masc: "masculino", m: "masculino", homem: "masculino",
+  feminino: "feminino", fem: "feminino", f: "feminino", mulher: "feminino",
+  outro: "outro", outros: "outro", "nao binario": "outro", "não binário": "outro",
+};
+
+const TIPO_SANGUINEO_ACEITOS = new Set(["A+","A-","B+","B-","AB+","AB-","O+","O-"]);
+
+function normStr(s: string) {
+  return s.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/_/g, " ");
+}
+
+function normalizarEstadoCivil(val: string): string | null {
+  return ESTADO_CIVIL_MAP[normStr(val)] ?? null;
+}
+
+function normalizarSexo(val: string): string | null {
+  return SEXO_MAP[normStr(val)] ?? null;
+}
+
+function normalizarTipoSanguineo(val: string): string | null {
+  const upper = val.trim().toUpperCase();
+  return TIPO_SANGUINEO_ACEITOS.has(upper) ? upper : null;
+}
+
 function mapearLinhas(raw: Row[]): Row[] {
   return raw.map((r) => {
-    const mapped: Row = { id: uuid(), created_at: new Date().toISOString() };
+    const mapped: Row = {
+      id: uuid(),
+      created_at: new Date().toISOString(),
+      status: "ativo", // valor padrão aceito pelo constraint
+    };
     for (const [orig, val] of Object.entries(r)) {
       const campo = CAMPO_MAP[normKey(orig)];
       if (campo) mapped[campo] = val ?? "";
     }
-    // garante que name existe
+
+    // normaliza campos com CHECK constraint
+    if (mapped.estado_civil !== undefined) {
+      const v = normalizarEstadoCivil(String(mapped.estado_civil));
+      if (v) mapped.estado_civil = v; else delete mapped.estado_civil;
+    }
+    if (mapped.sexo !== undefined) {
+      const v = normalizarSexo(String(mapped.sexo));
+      if (v) mapped.sexo = v; else delete mapped.sexo;
+    }
+    if (mapped.tipo_sanguineo !== undefined) {
+      const v = normalizarTipoSanguineo(String(mapped.tipo_sanguineo));
+      if (v) mapped.tipo_sanguineo = v; else delete mapped.tipo_sanguineo;
+    }
+
     if (!mapped.name) mapped.name = "";
     return mapped;
-  }).filter(r => r.name); // ignora linhas sem nome
+  }).filter(r => r.name);
 }
 
 async function enviarLotes(rows: Row[], onProgresso: (n: number) => void) {

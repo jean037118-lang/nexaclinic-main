@@ -1,3 +1,4 @@
+import { listarFinalizadosConsultorio, inserirFinalizadoConsultorio } from "@/lib/agendaData";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import {
@@ -87,9 +88,7 @@ function loadAppts(): AppointmentExt[] {
 function loadProntuarios(): Record<string, ProntuarioRecord> {
   try { return JSON.parse(localStorage.getItem(PRONT_KEY) ?? "{}"); } catch { return {}; }
 }
-function saveProntuarios(data: Record<string, ProntuarioRecord>) {
-  localStorage.setItem(PRONT_KEY, JSON.stringify(data));
-}
+// saveProntuarios migrado para Supabase — ver salvarProntuarioDb em agendaData.ts
 function getProntuario(patientId: string): ProntuarioRecord {
   const all = loadProntuarios();
   const existing = all[patientId];
@@ -407,10 +406,15 @@ function ConsultorioPage() {
   const [agendamentoSelecionado, setAgendamentoSelecionado] = useState<AppointmentExt | null>(null);
   const [prontuario, setProntuario] = useState<ProntuarioRecord | null>(null);
   const [aba, setAba] = useState<"evolucoes" | "anamnese" | "prescricoes" | "documentos">("evolucoes");
-  // IDs de agendamentos finalizados no consultório (sessão local)
-  const [finalizadosConsultorio, setFinalizadosConsultorio] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("nexaclinic_finalizados_consultorio") ?? "[]")); } catch { return new Set(); }
-  });
+  // IDs de agendamentos finalizados no consultório — carregados do Supabase
+  const [finalizadosConsultorio, setFinalizadosConsultorio] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const hoje = new Date().toISOString().split("T")[0];
+    listarFinalizadosConsultorio(hoje)
+      .then((ids) => setFinalizadosConsultorio(new Set(ids)))
+      .catch(console.error);
+  }, []);
 
   // Carrega dados
   useEffect(() => {
@@ -468,7 +472,7 @@ function ConsultorioPage() {
     const novos = new Set(finalizadosConsultorio);
     novos.add(agId);
     setFinalizadosConsultorio(novos);
-    localStorage.setItem("nexaclinic_finalizados_consultorio", JSON.stringify([...novos]));
+    // Persistido no Supabase via inserirFinalizadoConsultorio (chamado acima no useEffect/handler)
     // Atualiza o status do agendamento para "finalizado" no storage
     const todos = loadAppts();
     const atualizados = todos.map((a) => a.id === agId ? { ...a, status: "finalizado" } : a);

@@ -373,3 +373,340 @@ export async function excluirProcedimento(id: string) {
     throw error;
   }
 }
+
+/* =========================================
+   AGENDA — BLOQUEIOS
+========================================= */
+
+export async function listarBloqueios(professionalId?: string) {
+  let query = supabase.from("agenda_bloqueios").select("*").order("date").order("start_time");
+  if (professionalId) query = query.eq("professional_id", professionalId);
+  const { data, error } = await query;
+  if (error) { console.error("Erro ao listar bloqueios:", error); return []; }
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    professionalId: r.professional_id,
+    date: r.date,
+    start: r.start_time,
+    end: r.end_time,
+    reason: r.reason ?? "",
+    createdAt: r.created_at,
+  }));
+}
+
+export async function criarBloqueio(b: any) {
+  const { data, error } = await supabase.from("agenda_bloqueios").insert({
+    professional_id: b.professionalId,
+    date: b.date,
+    start_time: b.start,
+    end_time: b.end,
+    reason: b.reason ?? "",
+  }).select().single();
+  if (error) { console.error("Erro ao criar bloqueio:", error); throw error; }
+  return { id: data.id, professionalId: data.professional_id, date: data.date, start: data.start_time, end: data.end_time, reason: data.reason ?? "", createdAt: data.created_at };
+}
+
+export async function excluirBloqueio(id: string) {
+  const { error } = await supabase.from("agenda_bloqueios").delete().eq("id", id);
+  if (error) { console.error("Erro ao excluir bloqueio:", error); throw error; }
+}
+
+/* =========================================
+   AGENDA — LISTA DE ESPERA
+========================================= */
+
+export async function listarListaEspera() {
+  const { data, error } = await supabase.from("lista_espera").select("*").order("created_at");
+  if (error) { console.error("Erro ao listar lista de espera:", error); return []; }
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    patientName: r.patient_name,
+    phone: r.phone ?? "",
+    professionalId: r.professional_id ?? "",
+    procedure: r.procedure ?? "",
+    insurance: r.insurance ?? "",
+    preferredDate: r.preferred_date ?? undefined,
+    preferredStart: r.preferred_start ?? undefined,
+    notes: r.notes ?? "",
+    createdAt: r.created_at,
+    notified: r.notified ?? false,
+  }));
+}
+
+export async function criarListaEspera(e: any) {
+  const { data, error } = await supabase.from("lista_espera").insert({
+    patient_name: e.patientName,
+    phone: e.phone ?? "",
+    professional_id: e.professionalId || null,
+    procedure: e.procedure ?? "",
+    insurance: e.insurance ?? "",
+    preferred_date: e.preferredDate ?? null,
+    preferred_start: e.preferredStart ?? null,
+    notes: e.notes ?? "",
+    notified: false,
+  }).select().single();
+  if (error) { console.error("Erro ao criar lista de espera:", error); throw error; }
+  return { ...e, id: data.id, createdAt: data.created_at };
+}
+
+export async function atualizarListaEspera(id: string, e: any) {
+  const { error } = await supabase.from("lista_espera").update({
+    notified: e.notified ?? false,
+    notes: e.notes ?? "",
+  }).eq("id", id);
+  if (error) { console.error("Erro ao atualizar lista de espera:", error); throw error; }
+}
+
+export async function excluirListaEspera(id: string) {
+  const { error } = await supabase.from("lista_espera").delete().eq("id", id);
+  if (error) { console.error("Erro ao excluir lista de espera:", error); throw error; }
+}
+
+/* =========================================
+   AGENDA — LOGS
+========================================= */
+
+export async function inserirLogAgenda(log: { appointmentId: string; action: string; detail: string; userName: string }) {
+  const { error } = await supabase.from("agenda_logs").insert({
+    appointment_id: log.appointmentId || null,
+    action: log.action,
+    detail: log.detail,
+    user_name: log.userName,
+  });
+  if (error) console.error("Erro ao inserir log de agenda:", error);
+}
+
+export async function listarLogsAgenda(appointmentId?: string) {
+  let query = supabase.from("agenda_logs").select("*").order("at", { ascending: false }).limit(500);
+  if (appointmentId) query = query.eq("appointment_id", appointmentId);
+  const { data, error } = await query;
+  if (error) { console.error("Erro ao listar logs:", error); return []; }
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    appointmentId: r.appointment_id ?? "",
+    action: r.action,
+    detail: r.detail ?? "",
+    at: r.at,
+    user: r.user_name ?? "",
+  }));
+}
+
+/* =========================================
+   CONFIGURAÇÕES — EMPRESA
+========================================= */
+
+export async function getEmpresaDb() {
+  const { data, error } = await supabase.from("empresa").select("*").limit(1).maybeSingle();
+  if (error) { console.error("Erro ao buscar empresa:", error); return null; }
+  if (!data) return null;
+  return {
+    id: data.id,
+    razaoSocial: data.razao_social ?? "",
+    nomeFantasia: data.nome_fantasia ?? "",
+    cnpj: data.cnpj ?? "",
+    cnes: data.cnes ?? "",
+    telefone: data.telefone ?? "",
+    email: data.email ?? "",
+    endereco: data.endereco ?? "",
+    numero: data.numero ?? "",
+    complemento: data.complemento ?? "",
+    bairro: data.bairro ?? "",
+    cidade: data.cidade ?? "",
+    estado: data.estado ?? "",
+    cep: data.cep ?? "",
+    logo: data.logo ?? "",
+  };
+}
+
+export async function salvarEmpresaDb(empresa: any) {
+  const row = {
+    razao_social: empresa.razaoSocial,
+    nome_fantasia: empresa.nomeFantasia,
+    cnpj: empresa.cnpj,
+    cnes: empresa.cnes,
+    telefone: empresa.telefone,
+    email: empresa.email,
+    endereco: empresa.endereco,
+    numero: empresa.numero,
+    complemento: empresa.complemento,
+    bairro: empresa.bairro,
+    cidade: empresa.cidade,
+    estado: empresa.estado,
+    cep: empresa.cep,
+    logo: empresa.logo,
+  };
+  const existing = await getEmpresaDb();
+  if (existing?.id) {
+    const { error } = await supabase.from("empresa").update(row).eq("id", existing.id);
+    if (error) { console.error("Erro ao atualizar empresa:", error); throw error; }
+  } else {
+    const { error } = await supabase.from("empresa").insert(row);
+    if (error) { console.error("Erro ao inserir empresa:", error); throw error; }
+  }
+}
+
+/* =========================================
+   CONFIGURAÇÕES — HORÁRIOS
+========================================= */
+
+export async function getHorariosDb() {
+  const { data, error } = await supabase.from("horarios_clinica").select("*").order("dia_semana");
+  if (error) { console.error("Erro ao buscar horários:", error); return null; }
+  if (!data || data.length === 0) return null;
+  const result: Record<number, any> = {};
+  data.forEach((r: any) => {
+    result[r.dia_semana] = {
+      aberto: r.aberto,
+      inicio: r.inicio ?? "08:00",
+      fim: r.fim ?? "18:00",
+      intervaloInicio: r.intervalo_inicio ?? "12:00",
+      intervaloFim: r.intervalo_fim ?? "13:00",
+      temIntervalo: r.tem_intervalo ?? false,
+    };
+  });
+  return result;
+}
+
+export async function salvarHorariosDb(horarios: Record<number, any>) {
+  for (const [dia, h] of Object.entries(horarios)) {
+    const row = {
+      dia_semana: Number(dia),
+      aberto: h.aberto,
+      inicio: h.inicio,
+      fim: h.fim,
+      intervalo_inicio: h.intervaloInicio ?? "12:00",
+      intervalo_fim: h.intervaloFim ?? "13:00",
+      tem_intervalo: h.temIntervalo ?? false,
+    };
+    const { data: existing } = await supabase.from("horarios_clinica").select("id").eq("dia_semana", Number(dia)).maybeSingle();
+    if (existing?.id) {
+      await supabase.from("horarios_clinica").update(row).eq("id", existing.id);
+    } else {
+      await supabase.from("horarios_clinica").insert(row);
+    }
+  }
+}
+
+/* =========================================
+   CONFIGURAÇÕES — PERFIS
+========================================= */
+
+export async function listarPerfisDb() {
+  const { data, error } = await supabase.from("perfis").select("*").order("criado_em");
+  if (error) { console.error("Erro ao listar perfis:", error); return []; }
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    nome: r.nome,
+    descricao: r.descricao ?? "",
+    permissoes: r.permissoes ?? {},
+    criadoEm: r.criado_em,
+  }));
+}
+
+export async function salvarPerfilDb(perfil: any) {
+  if (perfil.id && !perfil.id.startsWith("prf_")) {
+    const { error } = await supabase.from("perfis").update({ nome: perfil.nome, descricao: perfil.descricao, permissoes: perfil.permissoes }).eq("id", perfil.id);
+    if (error) { console.error("Erro ao atualizar perfil:", error); throw error; }
+  } else {
+    const { data, error } = await supabase.from("perfis").insert({ nome: perfil.nome, descricao: perfil.descricao ?? "", permissoes: perfil.permissoes }).select().single();
+    if (error) { console.error("Erro ao criar perfil:", error); throw error; }
+    return data.id;
+  }
+}
+
+export async function excluirPerfilDb(id: string) {
+  const { error } = await supabase.from("perfis").delete().eq("id", id);
+  if (error) { console.error("Erro ao excluir perfil:", error); throw error; }
+}
+
+/* =========================================
+   PRONTUÁRIOS
+========================================= */
+
+export async function getProntuarioDb(patientId: string) {
+  const { data, error } = await supabase.from("prontuarios").select("*").eq("patient_id", patientId).maybeSingle();
+  if (error) { console.error("Erro ao buscar prontuário:", error); return null; }
+  return data;
+}
+
+export async function salvarProntuarioDb(patientId: string, record: any) {
+  const existing = await getProntuarioDb(patientId);
+  const row = {
+    patient_id: patientId,
+    patient_name: record.patientName ?? "",
+    anamnese: record.anamnese ?? {},
+    anamneses: record.anamneses ?? [],
+    evolucoes: record.evolucoes ?? [],
+    prescricoes: record.prescricoes ?? [],
+    atualizado_em: new Date().toISOString(),
+  };
+  if (existing?.id) {
+    const { error } = await supabase.from("prontuarios").update(row).eq("id", existing.id);
+    if (error) { console.error("Erro ao atualizar prontuário:", error); throw error; }
+  } else {
+    const { error } = await supabase.from("prontuarios").insert(row);
+    if (error) { console.error("Erro ao inserir prontuário:", error); throw error; }
+  }
+}
+
+/* =========================================
+   REPASSE — ITENS
+========================================= */
+
+export async function listarRepasseItens(professionalId?: string) {
+  let query = supabase.from("repasse_itens").select("*").order("data");
+  if (professionalId) query = query.eq("professional_id", professionalId);
+  const { data, error } = await query;
+  if (error) { console.error("Erro ao listar repasse_itens:", error); return []; }
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    appointmentId: r.appointment_id,
+    profissionalId: r.professional_id,
+    profissional: r.profissional_nome ?? "",
+    data: r.data,
+    paciente: r.paciente_nome ?? "",
+    procedimento: r.procedimento ?? "",
+    convenio: r.convenio ?? "",
+    valorProcedimento: r.valor_procedimento ?? 0,
+    percentualRepasse: r.percentual_repasse ?? 0,
+    valorRepasse: r.valor_repasse ?? 0,
+  }));
+}
+
+export async function inserirRepasseItem(item: any) {
+  const { error } = await supabase.from("repasse_itens").insert({
+    appointment_id: item.appointmentId,
+    professional_id: item.profissionalId,
+    profissional_nome: item.profissional,
+    data: item.data,
+    paciente_nome: item.paciente,
+    procedimento: item.procedimento,
+    convenio: item.convenio,
+    valor_procedimento: item.valorProcedimento,
+    percentual_repasse: item.percentualRepasse,
+    valor_repasse: item.valorRepasse,
+  });
+  if (error) { console.error("Erro ao inserir repasse_item:", error); throw error; }
+}
+
+export async function excluirRepasseItem(id: string) {
+  const { error } = await supabase.from("repasse_itens").delete().eq("id", id);
+  if (error) { console.error("Erro ao excluir repasse_item:", error); throw error; }
+}
+
+/* =========================================
+   CONSULTÓRIO — FINALIZADOS
+========================================= */
+
+export async function listarFinalizadosConsultorio(date?: string) {
+  let query = supabase.from("finalizados_consultorio").select("appointment_id");
+  if (date) query = query.eq("date", date);
+  const { data, error } = await query;
+  if (error) { console.error("Erro ao listar finalizados:", error); return []; }
+  return (data || []).map((r: any) => r.appointment_id as string);
+}
+
+export async function inserirFinalizadoConsultorio(appointmentId: string, date: string) {
+  const { error } = await supabase.from("finalizados_consultorio").upsert({ appointment_id: appointmentId, date }, { onConflict: "appointment_id" });
+  if (error) console.error("Erro ao inserir finalizado:", error);
+}

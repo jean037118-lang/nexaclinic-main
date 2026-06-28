@@ -30,6 +30,9 @@ import {
   listarProfissionais,
   listarProcedimentos,
   listarAgendamentos,
+  listarRepasseItens,
+  inserirRepasseItem,
+  excluirRepasseItem,
 } from "@/lib/agendaData";
 
 export const Route = createFileRoute("/repasse")({
@@ -81,10 +84,10 @@ interface RepasseRow {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
-const APT_KEY = "nexaclinic_appointments_v3";
-const PROC_KEY = "nexaclinic_procedimentos";
-const PROF_KEY = "nexaclinic_professionals";
-const REPASSE_PERC_KEY = "nexaclinic_repasse_percentuais";
+// const APT_KEY = "nexaclinic_appointments_v3";  // migrado para Supabase
+// const PROC_KEY = "nexaclinic_procedimentos";  // migrado para Supabase
+// const PROF_KEY = "nexaclinic_professionals";  // migrado para Supabase
+// const REPASSE_PERC_KEY = "nexaclinic_repasse_percentuais";  // migrado para Supabase
 
 function fmtBRL(val: number) {
   return val.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -104,28 +107,7 @@ function firstOfMonth() {
 }
 
 // ─── Storage helpers ──────────────────────────────────────────────────────
-function loadAppointments(): AppointmentExt[] {
-  try { return JSON.parse(localStorage.getItem(APT_KEY) ?? "[]"); } catch { return []; }
-}
-function loadProcedimentos(): Procedimento[] {
-  try { return JSON.parse(localStorage.getItem(PROC_KEY) ?? "[]"); } catch { return []; }
-}
-function loadProfessionals(): Professional[] {
-  try {
-    const saved = localStorage.getItem(PROF_KEY);
-    const base: Professional[] = saved ? JSON.parse(saved) : professionals;
-    // Mescla percentuais legados (chave separada) apenas se o profissional não tiver repasseValue definido
-    const percs: Record<string, number> = JSON.parse(
-      localStorage.getItem(REPASSE_PERC_KEY) ?? "{}"
-    );
-    return base.map((p) => ({
-      ...p,
-      repasseType:   p.repasseType  ?? "percentual",
-      repasseValue:  p.repasseValue ?? percs[p.id] ?? 50,
-      repasseRegras: p.repasseRegras ?? [],
-    }));
-  } catch { return professionals.map((p) => ({ ...p, repasseType: "percentual" as const, repasseValue: 50, repasseRegras: [] })); }
-}
+// loadAppointments/loadProcedimentos/loadProfessionals removidos — dados vêm do Supabase
 
 // Calcula o valor de repasse de acordo com as regras do profissional
 // Prioridade: procedimento+convênio > só procedimento > só convênio > padrão global
@@ -267,28 +249,25 @@ Período: ${dateFrom} a ${dateTo}`,
   const [appointments, setAppointments] = useState<AppointmentExt[]>([]);
   const [procedimentos, setProcedimentos] = useState<Procedimento[]>([]);
   const [profs, setProfs] = useState<Professional[]>([]);
+  const [repasseItensDb, setRepasseItensDb] = useState<any[]>([]);
   const [loadingDados, setLoadingDados] = useState(true);
 
   useEffect(() => {
     async function carregar() {
       try {
-        const [apts, procs, profissionaisDb] = await Promise.all([
+        const [apts, procs, profissionaisDb, itensRepasse] = await Promise.all([
           listarAgendamentos(),
           listarProcedimentos(),
           listarProfissionais(),
+          listarRepasseItens(),
         ]);
+        setRepasseItensDb(itensRepasse);
         setAppointments(apts as AppointmentExt[]);
         setProcedimentos(procs as Procedimento[]);
-        // Mescla percentual legado salvo em localStorage apenas se o profissional
-        // não tiver repasseValue definido no banco (compatibilidade).
-        const percs: Record<string, number> = (() => {
-          try { return JSON.parse(localStorage.getItem(REPASSE_PERC_KEY) ?? "{}"); }
-          catch { return {}; }
-        })();
         setProfs((profissionaisDb as Professional[]).map((p) => ({
           ...p,
           repasseType: p.repasseType ?? "percentual",
-          repasseValue: p.repasseValue ?? percs[p.id] ?? 50,
+          repasseValue: p.repasseValue ?? 50,
           repasseRegras: (p as any).repasseRegras ?? [],
         })));
       } catch (err) {
@@ -303,14 +282,11 @@ Período: ${dateFrom} a ${dateTo}`,
 
   // ─── Monta linhas de repasse ──────────────────────────────────────────
   const allRows = useMemo<RepasseRow[]>(() => {
-    // IDs de agendamentos que já têm repasse gerado via faturamento (repasseAoFaturar)
-    const REPASSE_ITENS_KEY = "nexaclinic_repasse_itens";
-    let repasseItens: any[] = [];
-    try { repasseItens = JSON.parse(localStorage.getItem(REPASSE_ITENS_KEY) ?? "[]"); } catch { repasseItens = []; }
-    const idsNoFaturamento = new Set(repasseItens.map((r: any) => r.appointmentId));
+    // IDs de agendamentos que já têm repasse gerado via faturamento — vindos do estado
+    const idsNoFaturamento = new Set(repasseItensDb.map((r: any) => r.appointmentId));
 
     // Linhas geradas automaticamente pelo faturamento (convênios com repasseAoFaturar)
-    const rowsFaturamento: RepasseRow[] = repasseItens.map((r: any) => {
+    const rowsFaturamento: RepasseRow[] = repasseItensDb.map((r: any) => {
       const apt = appointments.find((a) => a.id === r.appointmentId);
       return {
         appointmentId: r.appointmentId,

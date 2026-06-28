@@ -1,3 +1,4 @@
+import { getProntuarioDb, salvarProntuarioDb } from "@/lib/agendaData";
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import {
@@ -63,38 +64,32 @@ interface ProntuarioRecord {
   atualizadoEm: string;
 }
 
-// ─── Persistência ─────────────────────────────────────────────────────────────
-const PRONT_KEY = "nexaclinic_prontuarios_v2";
+// ─── Persistência — Supabase ──────────────────────────────────────────────────
+const PRONT_BASE: Omit<ProntuarioRecord, "patientId"> = {
+  anamnese: { queixaPrincipal: "", hda: "", hpp: "", hf: "", alergias: "", medicamentos: "", habitos: "", peso: "", altura: "", pressao: "", temperatura: "" },
+  anamneses: [],
+  evolucoes: [],
+  prescricoes: [],
+  atualizadoEm: "",
+};
 
-function loadProntuarios(): Record<string, ProntuarioRecord> {
-  try { return JSON.parse(localStorage.getItem(PRONT_KEY) ?? "{}"); }
-  catch { return {}; }
+async function getProntuario(patientId: string): Promise<ProntuarioRecord> {
+  try {
+    const data = await getProntuarioDb(patientId);
+    if (!data) return { patientId, ...PRONT_BASE };
+    return {
+      patientId,
+      anamnese: data.anamnese ?? PRONT_BASE.anamnese,
+      anamneses: data.anamneses ?? [],
+      evolucoes: data.evolucoes ?? [],
+      prescricoes: data.prescricoes ?? [],
+      atualizadoEm: data.atualizado_em ?? "",
+    };
+  } catch { return { patientId, ...PRONT_BASE }; }
 }
 
-function saveProntuarios(data: Record<string, ProntuarioRecord>) {
-  localStorage.setItem(PRONT_KEY, JSON.stringify(data));
-}
-
-function getProntuario(patientId: string): ProntuarioRecord {
-  const all = loadProntuarios();
-  const base = {
-    patientId,
-    anamnese: { queixaPrincipal: "", hda: "", hpp: "", hf: "", alergias: "", medicamentos: "", habitos: "", peso: "", altura: "", pressao: "", temperatura: "" },
-    anamneses: [] as AnamneseRecord[],
-    evolucoes: [],
-    prescricoes: [],
-    atualizadoEm: "",
-  };
-  const existing = all[patientId];
-  if (!existing) return base;
-  if (!(existing as any).anamneses) (existing as any).anamneses = [];
-  return { ...base, ...existing };
-}
-
-function saveProntuario(record: ProntuarioRecord) {
-  const all = loadProntuarios();
-  all[record.patientId] = { ...record, atualizadoEm: new Date().toISOString() };
-  saveProntuarios(all);
+async function saveProntuario(record: ProntuarioRecord, patientName?: string) {
+  await salvarProntuarioDb(record.patientId, { ...record, patientName: patientName ?? "" });
 }
 
 function uid() {
@@ -102,10 +97,7 @@ function uid() {
 }
 
 function getProfissionais(): Professional[] {
-  try {
-    const saved = localStorage.getItem("nexaclinic_professionals");
-    if (saved) return JSON.parse(saved);
-  } catch { /* */ }
+  // Profissionais carregados via Supabase no useEffect do componente
   return [];
 }
 

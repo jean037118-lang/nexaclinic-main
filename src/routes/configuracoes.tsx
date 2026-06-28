@@ -146,10 +146,7 @@ const PERMISSOES_VAZIAS: Record<keyof Permissoes, boolean> = {
   cancelarAgendamento: false,
 };
 
-function getPerfis(): Perfil[] {
-  try { return JSON.parse(localStorage.getItem(PERFIS_KEY) ?? "[]"); } catch { return []; }
-}
-function setPerfis(p: Perfil[]) { localStorage.setItem(PERFIS_KEY, JSON.stringify(p)); }
+// getPerfis/setPerfis migrados para Supabase — ver listarPerfisDb/salvarPerfilDb/excluirPerfilDb
 
 interface EmpresaData {
   razaoSocial: string;
@@ -174,10 +171,7 @@ const EMPRESA_VAZIA: EmpresaData = {
   complemento: "", bairro: "", cidade: "", estado: "", cep: "", logo: "",
 };
 
-function getEmpresa(): EmpresaData {
-  try { return { ...EMPRESA_VAZIA, ...JSON.parse(localStorage.getItem(EMPRESA_KEY) ?? "{}") }; } catch { return EMPRESA_VAZIA; }
-}
-function setEmpresa(e: EmpresaData) { localStorage.setItem(EMPRESA_KEY, JSON.stringify(e)); }
+// getEmpresa/setEmpresa migrados para Supabase — ver getEmpresaDb/salvarEmpresaDb
 
 // ─── Helpers visuais ──────────────────────────────────────────────────────────
 function roleBadge(role: UserRole) {
@@ -662,7 +656,10 @@ function AbaPerfis() {
   const [excluindo, setExcluindo] = useState<Perfil | null>(null);
   const [form, setForm] = useState({ nome: "", descricao: "", permissoes: { ...PERMISSOES_VAZIAS } });
 
-  function recarregar() { setPerfisState(getPerfis()); }
+  async function recarregar() {
+    const lista = await listarPerfisDb();
+    setPerfisState(lista as Perfil[]);
+  }
   useEffect(() => { recarregar(); }, []);
 
   function abrirNovo() {
@@ -677,28 +674,24 @@ function AbaPerfis() {
     setModalAberto(true);
   }
 
-  function salvar() {
+  async function salvar() {
     if (!form.nome.trim()) { toast.error("Informe um nome para o perfil"); return; }
-    const lista = getPerfis();
-    if (editando) {
-      const i = lista.findIndex((p) => p.id === editando.id);
-      if (i !== -1) lista[i] = { ...lista[i], ...form };
-    } else {
-      lista.push({ id: `prf_${Date.now()}`, ...form, criadoEm: new Date().toISOString() });
-    }
-    setPerfis(lista);
-    recarregar();
-    setModalAberto(false);
-    toast.success(editando ? "Perfil atualizado!" : "Perfil criado!");
+    try {
+      await salvarPerfilDb(editando ? { ...editando, ...form } : { id: `prf_${Date.now()}`, ...form, criadoEm: new Date().toISOString() });
+      await recarregar();
+      setModalAberto(false);
+      toast.success(editando ? "Perfil atualizado!" : "Perfil criado!");
+    } catch { toast.error("Erro ao salvar perfil"); }
   }
 
-  function confirmarExcluir() {
+  async function confirmarExcluir() {
     if (!excluindo) return;
-    const lista = getPerfis().filter((p) => p.id !== excluindo.id);
-    setPerfis(lista);
-    recarregar();
-    setExcluindo(null);
-    toast.success("Perfil excluído!");
+    try {
+      await excluirPerfilDb(excluindo.id);
+      await recarregar();
+      setExcluindo(null);
+      toast.success("Perfil excluído!");
+    } catch { toast.error("Erro ao excluir perfil"); }
   }
 
   function togglePermissao(chave: keyof Permissoes) {
@@ -859,7 +852,10 @@ function AbaPerfis() {
 // ABA: EMPRESA
 // ══════════════════════════════════════════════════════════════════════════════
 function AbaEmpresa() {
-  const [dados, setDados] = useState<EmpresaData>(getEmpresa);
+  const [dados, setDados] = useState<EmpresaData>(EMPRESA_VAZIA);
+  useEffect(() => {
+    getEmpresaDb().then((d) => { if (d) setDados(d as EmpresaData); }).catch(console.error);
+  }, []);
   const [salvando, setSalvando] = useState(false);
 
   function campo(k: keyof EmpresaData) {
@@ -869,13 +865,13 @@ function AbaEmpresa() {
     };
   }
 
-  function salvar() {
+  async function salvar() {
     setSalvando(true);
-    setTimeout(() => {
-      setEmpresa(dados);
-      setSalvando(false);
+    try {
+      await salvarEmpresaDb(dados);
       toast.success("Dados da empresa salvos!");
-    }, 400);
+    } catch { toast.error("Erro ao salvar dados da empresa"); }
+    finally { setSalvando(false); }
   }
 
   function formatarCNPJ(v: string) {
@@ -1129,24 +1125,13 @@ const HORARIOS_PADRAO: HorariosClinica = {
   6: { ...HORARIO_DIA_PADRAO },
 };
 
-function getHorarios(): HorariosClinica {
-  try {
-    const stored = localStorage.getItem(HORARIOS_KEY);
-    if (!stored) return HORARIOS_PADRAO;
-    const parsed = JSON.parse(stored);
-    // merge com padrão para garantir todos os campos
-    const result: HorariosClinica = {};
-    for (let i = 0; i <= 6; i++) {
-      result[i] = { ...HORARIO_DIA_PADRAO, ...(parsed[i] ?? {}) };
-    }
-    return result;
-  } catch {
-    return HORARIOS_PADRAO;
-  }
-}
+// getHorarios migrado para Supabase — ver getHorariosDb em agendaData.ts
 
 function AbaHorarios() {
-  const [horarios, setHorarios] = useState<HorariosClinica>(getHorarios);
+  const [horarios, setHorarios] = useState<HorariosClinica>(HORARIOS_PADRAO);
+  useEffect(() => {
+    getHorariosDb().then((h) => { if (h) setHorarios(h as HorariosClinica); }).catch(console.error);
+  }, []);
   const [salvando, setSalvando] = useState(false);
 
   function update(dia: number, campo: keyof HorarioDia, valor: boolean | string) {
@@ -1166,13 +1151,13 @@ function AbaHorarios() {
     toast.success("Horário copiado para os dias úteis!");
   }
 
-  function salvar() {
+  async function salvar() {
     setSalvando(true);
-    setTimeout(() => {
-      localStorage.setItem(HORARIOS_KEY, JSON.stringify(horarios));
-      setSalvando(false);
+    try {
+      await salvarHorariosDb(horarios);
       toast.success("Horários salvos com sucesso!");
-    }, 400);
+    } catch { toast.error("Erro ao salvar horários"); }
+    finally { setSalvando(false); }
   }
 
   const diasAbertos = Object.values(horarios).filter((h) => h.aberto).length;

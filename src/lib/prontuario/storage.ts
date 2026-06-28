@@ -1,17 +1,4 @@
-import { Prontuario } from './types';
+// storage.ts — prontuários migrados para Supabase
+// Use getProntuarioDb / salvarProntuarioDb de @/lib/agendaData
 
-const STORAGE_KEY = 'nexaclinic_prontuarios';
-
-export function readProntuarios(): Prontuario[] {
-  const data = localStorage.getItem(STORAGE_KEY);
-
-  if (!data) {
-    return [];
-  }
-
-  return JSON.parse(data);
-}
-
-export function saveProntuarios(prontuarios: Prontuario[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prontuarios));
-}
+export { getProntuarioDb as readProntuarios, salvarProntuarioDb as saveProntuarios } from "@/lib/agendaData";

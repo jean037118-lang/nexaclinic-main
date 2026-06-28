@@ -8,6 +8,17 @@ import {
   criarAgendamento,
   atualizarAgendamento,
   excluirAgendamento,
+  listarBloqueios,
+  criarBloqueio,
+  excluirBloqueio,
+  listarListaEspera,
+  criarListaEspera,
+  atualizarListaEspera,
+  excluirListaEspera,
+  inserirLogAgenda,
+  listarLogsAgenda,
+  excluirRepasseItem,
+  inserirFinalizadoConsultorio,
 } from "@/lib/agendaData";
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { patientStore } from "@/lib/patient-store";
@@ -128,9 +139,9 @@ export interface LogEntry {
 
 // ─── Storage ──────────────────────────────────────────────────────────────
 const APT_KEY = "nexaclinic_appointments_v3";
-const LOG_KEY = "nexaclinic_agenda_log";
-const WAITLIST_KEY = "nexaclinic_waitlist";
-const BLOCKS_KEY   = "nexaclinic_agenda_blocks";
+// const LOG_KEY = "nexaclinic_agenda_log";  // migrado para Supabase
+// const WAITLIST_KEY = "nexaclinic_waitlist";  // migrado para Supabase
+// const BLOCKS_KEY   = "nexaclinic_agenda_blocks";  // migrado para Supabase
 
 // ─── Lista de espera ──────────────────────────────────────────────────────
 export interface WaitlistEntry {
@@ -147,12 +158,7 @@ export interface WaitlistEntry {
   notified?: boolean;           // true quando o sistema detectou uma vaga e notificou
 }
 
-function loadWaitlist(): WaitlistEntry[] {
-  try { return JSON.parse(localStorage.getItem(WAITLIST_KEY) ?? "[]"); } catch { return []; }
-}
-function saveWaitlist(list: WaitlistEntry[]) {
-  localStorage.setItem(WAITLIST_KEY, JSON.stringify(list));
-}
+// Waitlist agora vem do Supabase — funções legacy removidas
 
 // ─── Bloqueios de horário ────────────────────────────────────────────────
 export interface AgendaBlock {
@@ -167,12 +173,7 @@ export interface AgendaBlock {
 
 const BLOCK_REASONS = ["Almoço", "Reunião", "Folga parcial", "Feriado interno", "Outros"] as const;
 
-function loadBlocks(): AgendaBlock[] {
-  try { return JSON.parse(localStorage.getItem(BLOCKS_KEY) ?? "[]"); } catch { return []; }
-}
-function saveBlocks(list: AgendaBlock[]) {
-  localStorage.setItem(BLOCKS_KEY, JSON.stringify(list));
-}
+// Bloqueios agora vêm do Supabase — funções legacy removidas
 
 function loadAppointments(): AppointmentExt[] {
   try { return JSON.parse(localStorage.getItem(APT_KEY) ?? "[]"); } catch { return []; }
@@ -180,23 +181,9 @@ function loadAppointments(): AppointmentExt[] {
 function saveAppointments(list: AppointmentExt[]) {
   localStorage.setItem(APT_KEY, JSON.stringify(list));
 }
-function loadLogs(): LogEntry[] {
-  try { return JSON.parse(localStorage.getItem(LOG_KEY) ?? "[]"); } catch { return []; }
-}
-function saveLogs(list: LogEntry[]) {
-  localStorage.setItem(LOG_KEY, JSON.stringify(list));
-}
 function addLog(appointmentId: string, action: string, detail: string) {
-  const log: LogEntry = {
-    id: `log_${Date.now()}`,
-    appointmentId,
-    action,
-    detail,
-    at: new Date().toISOString(),
-    user: "Jean Markys",
-  };
-  const logs = loadLogs();
-  saveLogs([log, ...logs]);
+  // Persiste log no Supabase (fire-and-forget)
+  inserirLogAgenda({ appointmentId, action, detail, userName: "Sistema" }).catch(console.error);
 }
 
 // ─── Helpers de data ──────────────────────────────────────────────────────
@@ -436,6 +423,10 @@ function AgendaPage() {
 
   useEffect(() => {
     let ativo = true;
+    // Carregar lista de espera e bloqueios do Supabase
+    listarListaEspera().then((lista) => setWaitlist(lista as WaitlistEntry[])).catch(console.error);
+    listarBloqueios().then((lista) => setBlocks(lista as AgendaBlock[])).catch(console.error);
+
     listarAgendamentos().then((lista: AppointmentExt[]) => {
       if (!ativo) return;
       // Marca esta carga como "vinda do servidor": sincroniza a referência junto
@@ -461,12 +452,12 @@ function AgendaPage() {
   const [profInfoTarget, setProfInfoTarget] = useState<any>(null);
 
   // ── Lista de espera ────────────────────────────────────────────────────
-  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>(() => loadWaitlist());
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [waitlistNewOpen, setWaitlistNewOpen] = useState(false);
 
   // ── Bloqueios de horário ───────────────────────────────────────────────
-  const [blocks, setBlocks] = useState<AgendaBlock[]>(() => loadBlocks());
+  const [blocks, setBlocks] = useState<AgendaBlock[]>([]);
   const [blockOpen, setBlockOpen] = useState(false);
   const [blockDefaults, setBlockDefaults] = useState<{ professionalId?: string; date?: string; start?: string } | null>(null);
 
@@ -551,8 +542,7 @@ function AgendaPage() {
       }
     });
   }, [appointments]);
-  useEffect(() => { saveWaitlist(waitlist); }, [waitlist]);
-  useEffect(() => { saveBlocks(blocks); }, [blocks]);
+  // Waitlist e bloqueios agora são persistidos via Supabase em cada operação CRUD
 
   // ── Auto-notificação de vaga: verifica lista de espera quando um agendamento é cancelado ──
   function checkWaitlistForSlot(cancelledApt: AppointmentExt) {
@@ -691,53 +681,26 @@ function AgendaPage() {
   function doCancel(reason: string) {
     if (!selected) return;
     const apt = selected;
-    const ACCOUNTS_KEY = "nexaclinic_financial_accounts";
-    const APTS_KEY     = "nexaclinic_appointments_v3";
+    // ACCOUNTS_KEY / APTS_KEY removidos — usar financialStorage / Supabase diretamente
     const log: string[] = [];
 
     try {
       // ── 1. Estornar pagamento particular (paid=true) ──────────────────────
       if (apt.paid && apt.amount != null) {
-        const accounts: any[] = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) ?? "[]");
-        // Marca as contas de receber deste agendamento como estornadas
-        const updated = accounts.map((acc: any) =>
-          acc.appointmentId === apt.id || acc.description?.includes(apt.id)
-            ? { ...acc, status: "estornado", estornadoEm: new Date().toISOString(), estornoMotivo: reason || "Cancelamento de agendamento" }
-            : acc
-        );
-        // Lança conta de estorno (crédito ao paciente / débito da clínica)
+        // Lança conta de estorno via Supabase (financialStorage)
         const estorno = {
-          id: `estorno_${apt.id}_${Date.now()}`,
-          type: "pagar",
+          id: "",
+          type: "pagar" as const,
           description: `Estorno — ${apt.patientName} (cancelamento)`,
-          value: apt.amount,
+          value: apt.amount ?? 0,
           dueDate: new Date().toISOString().split("T")[0],
           category: "Estorno / Cancelamento",
-          status: "pendente",
-          paymentMethod: apt.paymentMethod ?? "—",
-          destino: (() => {
-            const m = (apt.paymentMethod ?? "").toLowerCase();
-            if (m.includes("cart") || m.includes("créd") || m.includes("déb")) return "maquininha";
-            if (m === "pix" || m.includes("transfer")) return "conta_bancaria";
-            return "caixa_central";
-          })(),
-          origem: "cancelamento_agenda",
-          appointmentId: apt.id,
-          notes: `Estorno automático por cancelamento. Motivo: ${reason || "não informado"}. Valor pago: R$ ${apt.amount?.toFixed(2)}. Método: ${apt.paymentMethod}.`,
+          status: "pendente" as const,
+          notes: `Estorno automático. Motivo: ${reason || "não informado"}. Valor: R$ ${apt.amount?.toFixed(2)}. Método: ${apt.paymentMethod}.`,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([...updated, estorno]));
-        // Taxa MDR também precisa ser cancelada se existir
-        const mdrPendente = accounts.find((acc: any) =>
-          acc.description?.includes("Taxa MDR") && acc.notes?.includes(apt.id) && acc.status === "pendente"
-        );
-        if (mdrPendente) {
-          const sem_mdr = [...updated, estorno].map((acc: any) =>
-            acc.id === mdrPendente.id ? { ...acc, status: "cancelado", canceladoEm: new Date().toISOString() } : acc
-          );
-          localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(sem_mdr));
-        }
+        financialStorage.saveAccount(estorno).catch(console.error);
         log.push(`💰 Pagamento de ${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(apt.amount)} estornado`);
       }
 
@@ -773,18 +736,11 @@ function AgendaPage() {
 
       // ── 3. Reverter repasse médico gerado ─────────────────────────────────
       try {
-        const repasseKey = "nexaclinic_repasse_itens";
-        const repasseItens: any[] = JSON.parse(localStorage.getItem(repasseKey) ?? "[]");
-        const comRepasse = repasseItens.filter((r: any) => r.appointmentId === apt.id);
-        if (comRepasse.length > 0) {
-          const semRepasse = repasseItens.map((r: any) =>
-            r.appointmentId === apt.id
-              ? { ...r, status: "cancelado", canceladoEm: new Date().toISOString() }
-              : r
-          );
-          localStorage.setItem(repasseKey, JSON.stringify(semRepasse));
-          log.push(`👨‍⚕️ Repasse médico cancelado`);
-        }
+        // Remove repasse do Supabase (repasse_itens) pelo appointmentId
+        excluirRepasseItem(apt.id).then(() => {
+          // fire-and-forget — não bloqueia o cancelamento
+        }).catch(console.error);
+        log.push(`👨‍⚕️ Repasse médico cancelado`);
       } catch { /* silencioso */ }
 
     } catch (err) {
@@ -934,8 +890,8 @@ function AgendaPage() {
     if (isCard && valorTaxaMDR && valorTaxaMDR > 0) {
       try {
         const apt = appointments.find(a => a.id === id);
-        const ACCOUNTS_KEY = "nexaclinic_financial_accounts";
-        const accounts = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) ?? "[]");
+        // Contas financeiras gerenciadas pelo financialStorage (Supabase)
+        const accounts: any[] = []; // carregado via financialStorage quando necessário
         const hoje = new Date().toISOString().split("T")[0];
         const novaConta = {
           id: `mdr_${id}_${Date.now()}`,
@@ -953,7 +909,7 @@ function AgendaPage() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([...accounts, novaConta]));
+        financialStorage.saveAccount(novaConta).catch(console.error);
       } catch { /* silencioso */ }
     }
 
@@ -2589,7 +2545,9 @@ function AgendaPage() {
           toast.success("Paciente adicionado à lista de espera");
         }}
         onRemove={(id) => {
-          setWaitlist((prev) => prev.filter((w) => w.id !== id));
+          excluirListaEspera(id).then(() => {
+        setWaitlist((prev) => prev.filter((w) => w.id !== id));
+      }).catch(console.error);
           toast.success("Removido da lista de espera");
         }}
         onSchedule={(entry) => {
@@ -2886,7 +2844,12 @@ function LogsDialog({ open, onOpenChange, appointments }: {
   onOpenChange: (o: boolean) => void;
   appointments: AppointmentExt[];
 }) {
-  const logs = useMemo(() => loadLogs().slice(0, 50), [open]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  useEffect(() => {
+    if (open) {
+      listarLogsAgenda().then((lista) => setLogs(lista.slice(0, 50) as LogEntry[])).catch(console.error);
+    }
+  }, [open]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">

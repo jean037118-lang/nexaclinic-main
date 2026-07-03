@@ -30,6 +30,7 @@ import {
   UserCheck, Sparkles, Microscope, SendHorizonal, Layers, AlertTriangle,
   TrendingUp, Activity, RefreshCw, Stethoscope,
   ListOrdered, Lock, BellRing, CheckCheck, Trash2, Coffee, Menu, Pencil,
+  ChevronsUpDown, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -40,6 +41,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -47,6 +49,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   professionals, statusColors, statusLabels,
   type Appointment, type AppointmentStatus,
@@ -62,47 +65,86 @@ export const Route = createFileRoute("/agenda")({
 const HOURS = Array.from({ length: 12 }, (_, i) => 8 + i);
 const CELL_HEIGHT = 80; // px por hora — 80px/hora = 40px por 30min = ~1.33px por min
 const PAYMENT_METHODS = ["PIX", "Cartão de crédito", "Cartão de débito", "Dinheiro", "Boleto"];
-// Convênios são carregados dinamicamente do cadastro
-// Retorna true se o convênio tem "faturar: true" no cadastro
+
 function todayStr() {
   return new Date().toISOString().split("T")[0];
 }
 
+// ─── Cache global de convênios (Supabase) ──────────────────────────────────
+let _conveniosCache: any[] | null = null;
+async function getConveniosCache() {
+  if (_conveniosCache) return _conveniosCache;
+  try {
+    const { listarConvenios } = await import("@/lib/agendaData");
+    _conveniosCache = await listarConvenios();
+  } catch { _conveniosCache = []; }
+  return _conveniosCache ?? [];
+}
+// Invalida cache quando convenios mudam
+export function invalidateConveniosCache() { _conveniosCache = null; }
+
 function isConvenioFaturavel(insuranceName: string): boolean {
   if (!insuranceName || insuranceName === "Particular") return false;
   try {
-    const saved = localStorage.getItem("nexaclinic_convenios_v2");
-    if (!saved) return false;
-    const list = JSON.parse(saved) as { name: string; faturar?: boolean }[];
-    const conv = list.find(c => c.name?.toLowerCase().trim() === insuranceName?.toLowerCase().trim());
+    const list = _conveniosCache ?? JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
+    const conv = list.find((c: any) => c.name?.toLowerCase().trim() === insuranceName?.toLowerCase().trim());
     return conv?.faturar === true;
   } catch { return false; }
 }
 
-// Retorna o convenioId pelo nome
 function getConvenioId(insuranceName: string): string | null {
   try {
-    const saved = localStorage.getItem("nexaclinic_convenios_v2");
-    if (!saved) return null;
-    const list = JSON.parse(saved) as { id: string; name: string }[];
-    return list.find(c => c.name?.toLowerCase().trim() === insuranceName?.toLowerCase().trim())?.id ?? null;
+    const list = _conveniosCache ?? JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
+    return list.find((c: any) => c.name?.toLowerCase().trim() === insuranceName?.toLowerCase().trim())?.id ?? null;
   } catch { return null; }
 }
 
-function useConveniosNomes(open?: boolean): string[] {
-  return useMemo(() => {
-    try {
-      const saved = localStorage.getItem("nexaclinic_convenios_v2");
-      if (!saved) return ["Particular", "Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
-      const list = JSON.parse(saved) as { name: string; ativo?: boolean }[];
-      return ["Particular", ...list
-        .filter((c) => c.ativo !== false && c.name?.toLowerCase().trim() !== "particular")
-        .map((c) => c.name)];
-    } catch {
-      return ["Particular", "Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+// Hook: retorna lista de convênios completos do Supabase
+function useConveniosFull(open?: boolean): any[] {
+  const [list, setList] = useState<any[]>([]);
+  useEffect(() => {
+    if (!open && open !== undefined) return;
+    getConveniosCache().then(setList).catch(() => setList([]));
   }, [open]);
+  return list;
+}
+
+function useConveniosNomes(open?: boolean): string[] {
+  const full = useConveniosFull(open);
+  return useMemo(() => {
+    if (!full.length) {
+      // fallback enquanto carrega
+      try {
+        const saved = localStorage.getItem("nexaclinic_convenios_v2");
+        if (saved) {
+          const list = JSON.parse(saved) as { name: string; status?: string }[];
+          return ["Particular", ...list.filter((c) => c.status !== "inativo" && c.name?.toLowerCase() !== "particular").map((c) => c.name)];
+        }
+      } catch { /* */ }
+      return ["Particular"];
+    }
+    return ["Particular", ...full.filter((c) => c.status !== "inativo").map((c) => c.name)];
+  }, [full]);
+}
+
+// Hook: retorna lista de procedimentos ativos do Supabase
+function useProcedimentosList(open?: boolean): { name: string; tussCode?: string }[] {
+  const [list, setList] = useState<{ name: string; tussCode?: string }[]>([]);
+  useEffect(() => {
+    if (!open && open !== undefined) return;
+    import("@/lib/agendaData").then(({ listarProcedimentos }) =>
+      listarProcedimentos().then((procs: any[]) =>
+        setList(procs.filter((p) => p.status === "ativo").map((p) => ({ name: p.name, tussCode: p.tussCode })))
+      )
+    ).catch(() => {
+      // fallback localStorage
+      try {
+        const saved = JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
+        setList(saved.filter((p: any) => p.status === "ativo").map((p: any) => ({ name: p.name })));
+      } catch { setList([]); }
+    });
+  }, [open]);
+  return list;
 }
 
 export interface AppointmentExt extends Appointment {
@@ -3144,17 +3186,16 @@ function NewAppointmentDialog({
   const autoValue = useProcedureValue(procedure, insurance, profId, planoId);
   const conveniosList = useConveniosNomes(open);
 
-  // Planos do convênio selecionado
+  // Planos do convênio selecionado (usa cache Supabase)
+  const conveniosFull = useConveniosFull(open);
   const planosList = useMemo(() => {
     if (insurance === "Particular") return [];
-    try {
-      const convs = JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
-      const conv = convs.find((c: any) =>
-        c.name?.toLowerCase().trim() === insurance?.toLowerCase().trim()
-      );
-      return (conv?.planos ?? []).filter((p: any) => p.ativo !== false);
-    } catch { return []; }
-  }, [insurance, open]);
+    const source = conveniosFull.length ? conveniosFull : (() => {
+      try { return JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]"); } catch { return []; }
+    })();
+    const conv = source.find((c: any) => c.name?.toLowerCase().trim() === insurance?.toLowerCase().trim());
+    return (conv?.planos ?? []).filter((p: any) => p.ativo !== false);
+  }, [insurance, open, conveniosFull]);
 
   // ─── Aviso de retorno disponível ──────────────────────────────────────────
   // Calcula se o paciente selecionado tem um retorno disponível com este profissional
@@ -3373,12 +3414,13 @@ function NewAppointmentDialog({
   }
 
   // Carrega lista de procedimentos do cadastro
-  const proceduresList = useMemo(() => {
-    try {
-      const procs = JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
-      return procs.filter((p: { status: string }) => p.status === "ativo").map((p: { name: string }) => p.name);
-    } catch { return ["Consulta Clínica", "Retorno", "Eletrocardiograma"]; }
-  }, [open]);
+  const procedimentosData = useProcedimentosList(open);
+  const proceduresList = procedimentosData.map((p) => p.name);
+  // Busca local no combobox
+  const [procSearch, setProcSearch] = useState("");
+  const [convSearch, setConvSearch] = useState("");
+  const filteredProcs = proceduresList.filter((n) => n.toLowerCase().includes(procSearch.toLowerCase()));
+  const filteredConvs = conveniosList.filter((n) => n.toLowerCase().includes(convSearch.toLowerCase()));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -3519,29 +3561,71 @@ function NewAppointmentDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Procedimento</Label>
-              <Select value={procedure} onValueChange={setProcedure}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {proceduresList.length > 0
-                    ? proceduresList.map((name: string) => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
-                      ))
-                    : ["Consulta Clínica", "Retorno", "Eletrocardiograma"].map((name) => (
-                        <SelectItem key={name} value={name}>{name}</SelectItem>
-                      ))}
-                </SelectContent>
-              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
+                    <span className={procedure ? "text-foreground" : "text-muted-foreground"}>{procedure || "Selecione..."}</span>
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="start">
+                  <div className="p-2 border-b">
+                    <input
+                      className="w-full text-sm px-2 py-1 outline-none bg-transparent placeholder:text-muted-foreground"
+                      placeholder="Buscar procedimento..."
+                      value={procSearch}
+                      onChange={(e) => setProcSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {filteredProcs.length === 0 && (
+                      <p className="text-xs text-muted-foreground p-3 text-center">Nenhum resultado</p>
+                    )}
+                    {filteredProcs.map((name) => (
+                      <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${procedure === name ? "font-semibold text-primary" : ""}`}
+                        onClick={() => { setProcedure(name); setProcSearch(""); }}>
+                        {procedure === name && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
             <div>
               <Label className="text-xs">Convênio</Label>
-              <Select value={insurance} onValueChange={(v) => { setInsurance(v); setPlanoId(""); }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {conveniosList.map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
+                    <span className={insurance ? "text-foreground" : "text-muted-foreground"}>{insurance || "Selecione..."}</span>
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="start">
+                  <div className="p-2 border-b">
+                    <input
+                      className="w-full text-sm px-2 py-1 outline-none bg-transparent placeholder:text-muted-foreground"
+                      placeholder="Buscar convênio..."
+                      value={convSearch}
+                      onChange={(e) => setConvSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {filteredConvs.length === 0 && (
+                      <p className="text-xs text-muted-foreground p-3 text-center">Nenhum resultado</p>
+                    )}
+                    {filteredConvs.map((name) => (
+                      <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${insurance === name ? "font-semibold text-primary" : ""}`}
+                        onClick={() => { setInsurance(name); setPlanoId(""); setConvSearch(""); }}>
+                        {insurance === name && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -3672,6 +3756,12 @@ function PaymentDialog({ open, onOpenChange, appointment, onConfirm }: {
   const [numeroParcelas, setNParcelas] = useState(1);
   const [taxaMDRCustom, setTaxaMDRCustom] = useState<string>("");
   const [editandoMDR, setEditandoMDR] = useState(false);
+  // ── Duplo pagamento ──────────────────────────────────────────────────────
+  const [duploPagamento, setDuploPagamento] = useState(false);
+  const [method2, setMethod2]           = useState(PAYMENT_METHODS[3]); // Dinheiro
+  const [amount2Str, setAmount2Str]     = useState("");
+  const [cardBrand2, setCardBrand2]     = useState("");
+  const [authCode2, setAuthCode2]       = useState("");
 
   const maxDesconto = useMemo(() => {
     try {
@@ -3710,15 +3800,36 @@ function PaymentDialog({ open, onOpenChange, appointment, onConfirm }: {
       setNParcelas(1);
       setTaxaMDRCustom("");
       setEditandoMDR(false);
+      setDuploPagamento(false);
+      setMethod2(PAYMENT_METHODS[3]);
+      setAmount2Str("");
+      setCardBrand2("");
+      setAuthCode2("");
     }
   }, [open, appointment]);
+  
+  const isCard2 = method2 === "Cartão de crédito" || method2 === "Cartão de débito";
+  const amount2 = parseFloat(amount2Str.replace(",", ".")) || 0;
 
   function submit() {
     if (!amountOriginal || amountOriginal <= 0) { toast.error("Informe um valor válido"); return; }
     if (discount > maxDesconto) { toast.error(`Seu limite de desconto é ${maxDesconto}%`); return; }
-    if (isCard && !cardBrand) { toast.error("Selecione a bandeira do cartão"); return; }
-    const datas = isCredito && numeroParcelas > 1 ? calcDatasParcelas(numeroParcelas) : undefined;
-    onConfirm(amountFinal, method, discount, amountOriginal, isCard ? cardBrand : undefined, isCard ? authCode : undefined, isCard ? taxaMDR : undefined, isCard ? numeroParcelas : undefined, datas);
+    if (isCard && !cardBrand) { toast.error("Selecione a bandeira do cartão (1ª forma)"); return; }
+    if (duploPagamento) {
+      if (amount2 <= 0) { toast.error("Informe o valor da 2ª forma de pagamento"); return; }
+      if (isCard2 && !cardBrand2) { toast.error("Selecione a bandeira do cartão (2ª forma)"); return; }
+      const totalDuplo = amountFinal - amount2;
+      if (totalDuplo < 0) { toast.error("Soma das duas formas não pode ultrapassar o valor total"); return; }
+      // Concatena métodos no campo paymentMethod: "PIX + Dinheiro"
+      const methodCombinado = `${method} + ${method2}`;
+      const brandCombinado = [isCard ? cardBrand : "", isCard2 ? cardBrand2 : ""].filter(Boolean).join(" + ") || undefined;
+      const authCombinado = [isCard ? authCode : "", isCard2 ? authCode2 : ""].filter(Boolean).join(" / ") || undefined;
+      const datas = isCredito && numeroParcelas > 1 ? calcDatasParcelas(numeroParcelas) : undefined;
+      onConfirm(amountFinal, methodCombinado, discount, amountOriginal, brandCombinado, authCombinado, isCard ? taxaMDR : undefined, isCard ? numeroParcelas : undefined, datas);
+    } else {
+      const datas = isCredito && numeroParcelas > 1 ? calcDatasParcelas(numeroParcelas) : undefined;
+      onConfirm(amountFinal, method, discount, amountOriginal, isCard ? cardBrand : undefined, isCard ? authCode : undefined, isCard ? taxaMDR : undefined, isCard ? numeroParcelas : undefined, datas);
+    }
   }
 
   const fmtBRLLocal = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -3824,6 +3935,57 @@ function PaymentDialog({ open, onOpenChange, appointment, onConfirm }: {
                 <Input placeholder="Ex: 123456" value={authCode} onChange={(e) => setAuthCode(e.target.value)} maxLength={20} />
               </div>
             </>
+          )}
+
+          {/* ── DUPLO PAGAMENTO ── */}
+          <div className="flex items-center gap-2 pt-1">
+            <Switch checked={duploPagamento} onCheckedChange={setDuploPagamento} id="duplo-pag" />
+            <label htmlFor="duplo-pag" className="text-xs text-slate-600 cursor-pointer select-none">
+              Dividir em 2 formas de pagamento
+            </label>
+          </div>
+
+          {duploPagamento && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+              <p className="text-xs font-semibold text-slate-600">2ª Forma de Pagamento</p>
+              <div>
+                <Label className="text-xs">Valor da 2ª forma (R$) *</Label>
+                <Input type="number" step="0.01" min="0" placeholder="0,00"
+                  value={amount2Str} onChange={(e) => setAmount2Str(e.target.value)} />
+                {amount2 > 0 && amountFinal > 0 && (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    1ª forma: {(amountFinal - amount2).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} · 
+                    2ª forma: {amount2.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label className="text-xs">2ª Forma *</Label>
+                <Select value={method2} onValueChange={setMethod2}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {isCard2 && (
+                <>
+                  <div>
+                    <Label className="text-xs">Bandeira *</Label>
+                    <Select value={cardBrand2} onValueChange={setCardBrand2}>
+                      <SelectTrigger><SelectValue placeholder="Selecione a bandeira" /></SelectTrigger>
+                      <SelectContent>
+                        {CARD_BRANDS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Código de autorização</Label>
+                    <Input placeholder="Ex: 123456" value={authCode2} onChange={(e) => setAuthCode2(e.target.value)} maxLength={20} />
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {/* ── RESUMO FINANCEIRO ── */}

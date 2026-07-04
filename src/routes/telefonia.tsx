@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { patientStore } from "@/lib/patient-store";
+import { listarAgendamentos, listarProfissionais } from "@/lib/agendaData";
 
 export const Route = createFileRoute("/telefonia")({
   head: () => ({ meta: [{ title: "Telefonia — NexaClinic" }] }),
@@ -330,19 +332,31 @@ function TelefoniaPage() {
   const [aba, setAba]               = useState<"pendentes" | "historico" | "contato_rapido">("pendentes");
 
   // Carrega agendamentos para a fila de pendências
-  const apts: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_appointments_v3") ?? "[]"); } catch { return []; }
-  }, []);
-  const profs: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_professionals") ?? "[]"); } catch { return []; }
+  // (antes lia de um espelho em localStorage que só era escrito como
+  // efeito colateral de abrir a Agenda/Faturamento — por isso ficava
+  // vazio/desatualizado. Agora busca direto da fonte real, o Supabase.)
+  const [apts, setApts] = useState<any[]>([]);
+  const [profs, setProfs] = useState<any[]>([]);
+  useEffect(() => {
+    listarAgendamentos().then(setApts);
+    listarProfissionais().then(setProfs);
   }, []);
 
   function reloadLog() { setLog(loadLog()); }
 
   // Fila de pendentes: agendamentos dos próximos 3 dias ainda sem confirmação
-  const hoje = new Date().toISOString().split("T")[0];
+  // (data local, não toISOString/UTC — em UTC-3 o toISOString já vira o dia
+  // seguinte a partir das 21h no horário do Brasil, fazendo a fila de hoje
+  // sumir mais cedo do que deveria)
+  function dataLocalYMD(d: Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dia = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dia}`;
+  }
+  const hoje = dataLocalYMD(new Date());
   const em3 = new Date(); em3.setDate(em3.getDate() + 3);
-  const em3str = em3.toISOString().split("T")[0];
+  const em3str = dataLocalYMD(em3);
 
   const pendentes = useMemo(() => {
     const jaContatados = new Set(log.map(r => r.agendamentoId).filter(Boolean));
@@ -362,8 +376,16 @@ function TelefoniaPage() {
   }, [apts, log, profs]);
 
   // Pacientes para busca na aba "Contato rápido"
-  const pacientes: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_patients_v3") ?? "[]"); } catch { return []; }
+  // (mesma correção: buscava de um espelho em localStorage que nunca era
+  // populado desde a migração dos pacientes para o Supabase — a busca
+  // sempre voltava vazia)
+  const [pacientes, setPacientes] = useState<any[]>(() => patientStore.getAll());
+  useEffect(() => {
+    setPacientes(patientStore.getAll());
+    if (!patientStore.isLoaded()) {
+      patientStore.refresh().then(setPacientes);
+    }
+    return patientStore.subscribe(() => setPacientes(patientStore.getAll()));
   }, []);
 
   const pacientesFiltrados = useMemo(() => {
@@ -383,11 +405,11 @@ function TelefoniaPage() {
 
   // Stats rápidos
   const stats = useMemo(() => ({
-    hoje:       log.filter(r => r.criadoEm.startsWith(hoje)).length,
+    hoje:       log.filter(r => dataLocalYMD(new Date(r.criadoEm)) === hoje).length,
     pendentes:  pendentes.filter(a => !a.jaContatado).length,
-    confirmados: log.filter(r => r.resultado === "confirmado" && r.criadoEm.startsWith(hoje)).length,
+    confirmados: log.filter(r => r.resultado === "confirmado" && dataLocalYMD(new Date(r.criadoEm)) === hoje).length,
     semTel:     apts.filter(a => a.date >= hoje && a.date <= em3str && !a.phone && ["agendado","confirmado"].includes(a.status)).length,
-  }), [log, pendentes, apts]);
+  }), [log, pendentes, apts, hoje]);
 
   function abrirPainel(apt: any) {
     setApt(apt);

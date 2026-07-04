@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { listarAuditoria, type AuditEntry, ROLE_LABELS } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -21,8 +21,13 @@ function fmt(iso: string) {
 
 export function AuditoriaLog() {
   const [busca, setBusca] = useState("");
+  const [log, setLog] = useState<AuditEntry[]>([]);
 
-  const entries: AuditEntry[] = listarAuditoria().filter((e) => {
+  useEffect(() => {
+    listarAuditoria().then((dados) => setLog(dados));
+  }, []);
+
+  const entries: AuditEntry[] = log.filter((e) => {
     if (!busca) return true;
     const q = busca.toLowerCase();
     return (

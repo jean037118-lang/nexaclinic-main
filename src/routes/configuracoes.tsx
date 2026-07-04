@@ -294,7 +294,7 @@ function AbaUsuarios() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [erros, setErros] = useState<Partial<UserForm>>({});
 
-  function recarregar() { setUsuarios(listarUsuarios()); }
+  function recarregar() { return listarUsuarios().then((dados) => setUsuarios(dados)); }
   useEffect(() => { recarregar(); }, []);
 
   const filtrados = usuarios.filter(
@@ -329,41 +329,41 @@ function AbaUsuarios() {
     return Object.keys(e).length === 0;
   }
 
-  function salvar() {
+  async function salvar() {
     if (!validar()) return;
     try {
       if (editando) {
         const dados: Partial<AppUser> = { nome: form.nome, email: form.email, role: form.role, ativo: form.ativo };
         if (form.senha) dados.senha = form.senha;
-        atualizarUsuario(editando.id, dados);
+        await atualizarUsuario(editando.id, dados);
         toast.success("Usuário atualizado!");
       } else {
-        criarUsuario({ nome: form.nome, email: form.email, senha: form.senha, role: form.role, ativo: form.ativo });
+        await criarUsuario({ nome: form.nome, email: form.email, senha: form.senha, role: form.role, ativo: form.ativo });
         toast.success("Usuário criado!");
       }
       setModalAberto(false);
-      recarregar();
+      await recarregar();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Erro ao salvar");
     }
   }
 
-  function confirmarExcluir() {
+  async function confirmarExcluir() {
     if (!excluindo) return;
     try {
-      excluirUsuario(excluindo.id);
+      await excluirUsuario(excluindo.id);
       toast.success("Usuário excluído!");
       setExcluindo(null);
-      recarregar();
+      await recarregar();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Erro ao excluir");
     }
   }
 
-  function toggleAtivo(u: AppUser) {
+  async function toggleAtivo(u: AppUser) {
     try {
-      atualizarUsuario(u.id, { ativo: !u.ativo });
-      recarregar();
+      await atualizarUsuario(u.id, { ativo: !u.ativo });
+      await recarregar();
       toast.success(u.ativo ? "Usuário desativado" : "Usuário ativado");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Erro");
@@ -524,7 +524,14 @@ function AbaSenha() {
   const [mostrar, setMostrar] = useState({ atual: false, nova: false, conf: false });
   const [erros, setErros] = useState<Record<string, string>>({});
 
-  useEffect(() => { setUsuarios(listarUsuarios().filter((u) => u.id !== usuarioAtual?.id)); }, [usuarioAtual?.id]);
+  useEffect(() => {
+    let ativo = true;
+    (async () => {
+      const lista = await listarUsuarios();
+      if (ativo) setUsuarios(lista.filter((u) => u.id !== usuarioAtual?.id));
+    })();
+    return () => { ativo = false; };
+  }, [usuarioAtual?.id]);
 
   function validar() {
     const e: Record<string, string> = {};
@@ -536,7 +543,7 @@ function AbaSenha() {
     return Object.keys(e).length === 0;
   }
 
-  function salvar() {
+  async function salvar() {
     if (!validar()) return;
     try {
       if (modo === "proprio") {
@@ -545,10 +552,10 @@ function AbaSenha() {
           setErros({ senhaAtual: "Senha atual incorreta" });
           return;
         }
-        atualizarUsuario(usuarioAtual.id, { senha: novaSenha });
+        await atualizarUsuario(usuarioAtual.id, { senha: novaSenha });
         toast.success("Senha alterada com sucesso!");
       } else {
-        atualizarUsuario(usuarioSelecionado, { senha: novaSenha });
+        await atualizarUsuario(usuarioSelecionado, { senha: novaSenha });
         toast.success("Senha do usuário alterada!");
       }
       setSenhaAtual(""); setNovaSenha(""); setConfirmar(""); setUsuarioSelecionado("");
@@ -1674,7 +1681,9 @@ function AbaAuditoria() {
   const [pagina, setPagina] = React.useState(1);
   const POR_PAGINA = 25;
 
-  function recarregar() { setLog(listarAuditoria()); }
+  function recarregar() {
+    listarAuditoria().then((dados) => setLog(dados));
+  }
   React.useEffect(() => { recarregar(); }, []);
 
   const usuarios = React.useMemo(

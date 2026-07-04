@@ -129,7 +129,7 @@ function useConveniosNomes(open?: boolean): string[] {
       } catch { /* */ }
       return ["Particular"];
     }
-    return ["Particular", ...full.filter((c) => c.status !== "inativo").map((c) => c.name)];
+    return ["Particular", ...full.filter((c) => c.status !== "inativo" && c.name?.toLowerCase().trim() !== "particular").map((c) => c.name)];
   }, [full]);
 }
 
@@ -385,48 +385,50 @@ function buscarValorNaTabela(
 }
 
 // ─── Hook: valor padrão do procedimento ──────────────────────────────────
-// Ordem de prioridade:
-//   0. valorPorProfissional[] no procedimento (se Particular e profissional tem valor específico)
-//   1. valorParticular do cadastro (se preenchido e > 0)            → Particular
-//   2. Tabela do convênio "Particular" (vínculo ID → TUSS → nome)  → Particular sem valor
-//   3. Tabela do convênio selecionado (vínculo ID → TUSS → nome)   → Convênio
-//   4. Fallback legado: convenioValores[] no próprio procedimento   → Convênio
-//   5. Último fallback: valorParticular do cadastro                 → Convênio sem tabela
+// Ordem de prioridade (conforme cadastro do Procedimento):
+//   1. Campo do procedimento para o convênio selecionado:
+//      - Particular → "Valor Particular"
+//      - Convênio   → "Valores por convênio" (convenioValores[])
+//   2. Se vazio → "Valor particular por profissional" (valorPorProfissional[])
+//      — vale tanto para Particular quanto para convênio, pelo profissional
+//        que está atendendo.
+//   3. Se ainda vazio → tabela de preços cadastrada no próprio Convênio
+//      (Convênios → planos/tabelas), filtrada pelo plano se selecionado.
+//   4. Último fallback → Valor Particular do cadastro.
 function useProcedureValue(procedureName: string, insurance: string, professionalId: string | undefined, planoId: string | undefined, procsFull: any[], conveniosFull: any[]): string {
   return useMemo(() => {
     if (!procedureName) return "";
     try {
       const normalize = (s: string) =>
         s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const isPositivo = (v: any) => v != null && v !== "" && parseFloat(String(v).replace(",", ".")) > 0;
 
       const procs = procsFull ?? [];
       const found = procs.find((p: any) => normalize(p.name) === normalize(procedureName));
       if (!found) return "";
 
       const convenios = conveniosFull ?? [];
+      const isParticular = insurance === "Particular";
 
-      if (insurance === "Particular") {
-        if (professionalId && found.valorPorProfissional?.length) {
-          const vprof = found.valorPorProfissional.find((v: any) => v.professionalId === professionalId);
-          if (vprof?.valor && parseFloat(String(vprof.valor).replace(",", ".")) > 0) return String(vprof.valor);
-        }
-        const vp = found.valorParticular;
-        if (vp && parseFloat(String(vp).replace(",", ".")) > 0) return String(vp);
-        const convParticular = convenios.find((c: any) => normalize(c.name) === "particular");
-        const daTabela = buscarValorNaTabela(found, convParticular ?? {}, normalize);
-        if (daTabela) return daTabela;
-        return vp ?? "";
+      // 1. Campo do procedimento para o convênio/particular selecionado
+      const campoConvenio = isParticular
+        ? found.valorParticular
+        : found.convenioValores?.find((c: any) => normalize(c.convenio) === normalize(insurance))?.valor;
+      if (isPositivo(campoConvenio)) return String(campoConvenio);
+
+      // 2. Valor particular por profissional (vale para Particular e Convênio)
+      if (professionalId && found.valorPorProfissional?.length) {
+        const vprof = found.valorPorProfissional.find((v: any) => v.professionalId === professionalId);
+        if (isPositivo(vprof?.valor)) return String(vprof.valor);
       }
 
-      // Convênio: busca na tabela do plano selecionado
-      const conv = convenios.find((c: any) => normalize(c.name) === normalize(insurance));
-      const daTabela = buscarValorNaTabela(found, conv ?? {}, normalize, planoId);
+      // 3. Tabela de preços cadastrada no Convênio (ou no Convênio "Particular")
+      const nomeConvBusca = isParticular ? "particular" : normalize(insurance);
+      const conv = convenios.find((c: any) => normalize(c.name) === nomeConvBusca);
+      const daTabela = buscarValorNaTabela(found, conv ?? {}, normalize, isParticular ? undefined : planoId);
       if (daTabela) return daTabela;
 
-      // Fallback legado: convenioValores[] no próprio procedimento
-      const cv = found.convenioValores?.find((c: any) => normalize(c.convenio) === normalize(insurance));
-      if (cv?.valor) return cv.valor;
-
+      // 4. Último fallback: Valor Particular do cadastro
       return found.valorParticular ?? "";
     } catch { return ""; }
   }, [procedureName, insurance, professionalId, planoId, procsFull, conveniosFull]);
@@ -3229,14 +3231,10 @@ function NewAppointmentDialog({
     return (conv?.planos ?? []).filter((p: any) => p.ativo !== false);
   }, [insurance, conveniosFull]);
 
-  // Assim que os procedimentos carregam, se nada foi selecionado ainda,
-  // pré-seleciona o 1º procedimento ativo real cadastrado.
-  useEffect(() => {
-    if (open && !procedure && procedimentosFull.length > 0) {
-      setProcedure(procedimentosFull[0].name);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, procedimentosFull]);
+  // O campo Procedimento começa vazio ("Selecione...") e só é preenchido
+  // quando o usuário escolhe explicitamente na busca — nunca um valor
+  // padrão automático, para não sugerir um procedimento que não existe
+  // ou não foi escolhido pelo usuário.
 
 
   // ─── Aviso de retorno disponível ──────────────────────────────────────────
@@ -3353,6 +3351,7 @@ function NewAppointmentDialog({
     if (!patientName.trim()) { toast.error("Informe o nome do paciente"); return; }
     if (!phone.trim()) { toast.error("Telefone é obrigatório"); return; }
     if (!cpf.trim()) { toast.error("CPF é obrigatório"); return; }
+    if (!procedure.trim()) { toast.error("Selecione o procedimento"); return; }
     // Valida se o profissional atende na data selecionada
     if (isProfAvailableOnDate && date) {
       try {

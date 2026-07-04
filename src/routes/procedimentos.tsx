@@ -93,15 +93,22 @@ const DEFAULTS: Procedimento[] = [
 
 const CATEGORIES = ["Consulta", "Exame", "Cirurgia", "Terapia", "Procedimento", "Outro"];
 
-function readConveniosNomes(): string[] {
-  if (typeof window === "undefined") return ["Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
+// Busca a lista real de convênios cadastrados (Supabase, com cache
+// compartilhado e auto-invalidado — ver @/lib/agendaData).
+// Antes esta função lia a chave "nexaclinic_convenios_v2" do localStorage,
+// que nenhuma tela grava mais (o cadastro de convênios migrou pro Supabase),
+// e por isso sempre caía no fallback com nomes fictícios ("Unimed",
+// "Bradesco Saúde" etc.) — convênios que o usuário nunca cadastrou.
+async function fetchConveniosNomes(): Promise<string[]> {
   try {
-    const saved = localStorage.getItem("nexaclinic_convenios_v2");
-    if (!saved) return ["Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
-    const list = JSON.parse(saved) as { name: string; ativo?: boolean }[];
-    return list.filter((c) => c.ativo !== false).map((c) => c.name);
+    const { listarConvenios } = await import("@/lib/agendaData");
+    const list = await listarConvenios();
+    return (list as any[])
+      .filter((c) => c.status !== "inativo")
+      .map((c) => c.name)
+      .filter(Boolean);
   } catch {
-    return ["Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
+    return [];
   }
 }
 
@@ -138,7 +145,7 @@ function fmt(v: string) {
 // ─── página ──────────────────────────────────────────────────────────────────
 function ProcedimentosPage() {
   const [procedimentos, setProcedimentos] = useState<Procedimento[]>([]);
-  const [conveniosNomes, setConveniosNomes] = useState<string[]>(() => readConveniosNomes());
+  const [conveniosNomes, setConveniosNomes] = useState<string[]>([]);
   const [profissionais, setProfissionais] = useState<{ id: string; name: string; specialty?: string }[]>([]);
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("Todos");
@@ -159,10 +166,13 @@ function ProcedimentosPage() {
     }
     carregar();
   }, []);
+  useEffect(() => {
+    fetchConveniosNomes().then(setConveniosNomes);
+  }, []);
   // Relê convênios e profissionais toda vez que o dialog abre para capturar novos cadastros
   useEffect(() => {
     if (formOpen) {
-      setConveniosNomes(readConveniosNomes());
+      fetchConveniosNomes().then(setConveniosNomes);
       try {
         const saved = localStorage.getItem("nexaclinic_professionals");
         if (saved) {

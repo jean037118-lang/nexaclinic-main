@@ -63,6 +63,10 @@ interface AppointmentRaw {
   numeroParcelas?: number;
   datasParcelas?: string[];
   sentToBilling?: boolean;
+  // Pagamento dividido em 2 formas (ex: parte em Dinheiro, parte no Cartão).
+  // Quando presente, cada item vira uma Account própria com seu destino,
+  // em vez de jogar o valor todo em um único destino.
+  paymentSplit?: { method: string; amount: number; cardBrand?: string; authCode?: string }[];
 }
 
 const APPT_KEY = 'nexaclinic_appointments_v3';
@@ -87,13 +91,47 @@ function loadPaidAppointments(): AppointmentRaw[] {
 }
 
 /**
- * Converte agendamento pago → Account virtual com destino correto.
+ * Converte agendamento pago → Account(s) virtual com destino correto.
  * A forma de pagamento define automaticamente o destino:
  *   Dinheiro → caixa_central
  *   PIX      → conta_bancaria
  *   Cartão   → maquininha
+ *
+ * Quando o pagamento foi dividido em 2 formas (ex: parte Dinheiro + parte
+ * Cartão), retorna DUAS Accounts — uma por forma de pagamento — cada uma
+ * com seu próprio destino e valor, em vez de jogar o total em um destino só.
  */
-function apptToAccount(a: AppointmentRaw): Account {
+function apptToAccount(a: AppointmentRaw): Account[] {
+  if (a.paymentSplit && a.paymentSplit.length > 0) {
+    return a.paymentSplit
+      .filter((s) => s.amount > 0)
+      .map((s, idx) => {
+        const metodo  = (s.method ?? 'Dinheiro') as MetodoPagamento;
+        const destino = metodoParaDestinoDefault(metodo);
+        const isCard  = metodo === 'Cartão de Crédito' || metodo === 'Cartão de Débito';
+        // Rateia a taxa MDR proporcionalmente apenas na parcela em cartão
+        const valorReal = isCard && a.valorTaxaMDR && a.amount
+          ? parseFloat((s.amount - (a.valorTaxaMDR * (s.amount / a.amount))).toFixed(2))
+          : s.amount;
+        return {
+          id:            `appt_${a.id}_${idx + 1}`,
+          type:          'receber',
+          description:   `${a.procedure || 'Consulta'} — ${a.patientName} (${idx + 1}ª forma)`,
+          value:         valorReal,
+          dueDate:       a.date,
+          category:      a.insurance || 'Particular',
+          status:        'pago',
+          paymentMethod: metodo,
+          destino,
+          origem:        'agendamento',
+          origemId:      a.id,
+          notes:         `Pagamento dividido — Forma ${idx + 1}: ${metodo} | Destino: ${DESTINO_LABELS[destino]}` + (s.cardBrand ? ` | Bandeira: ${s.cardBrand}` : ''),
+          createdAt:     `${a.date}T${a.start || '08:00'}:00`,
+          updatedAt:     `${a.date}T${a.start || '08:00'}:00`,
+        } as Account;
+      });
+  }
+
   const valor   = a.amount ?? a.procedureValue ?? 0;
   const metodo  = (a.paymentMethod ?? 'Dinheiro') as MetodoPagamento;
   const destino = metodoParaDestinoDefault(metodo);
@@ -102,7 +140,7 @@ function apptToAccount(a: AppointmentRaw): Account {
     ? a.valorLiquido
     : (a.amount ?? a.procedureValue ?? 0);
 
-  return {
+  return [{
     id:            `appt_${a.id}`,
     type:          'receber',
     description:   `${a.procedure || 'Consulta'} — ${a.patientName}`,
@@ -117,7 +155,7 @@ function apptToAccount(a: AppointmentRaw): Account {
     notes:         `Forma: ${metodo} | Destino: ${DESTINO_LABELS[destino]}` + (a.taxaMDR ? ` | MDR ${a.taxaMDR}% = R$ ${a.valorTaxaMDR?.toFixed(2) ?? '?'} | Líquido: R$ ${valorReal.toFixed(2)}` : '') + (a.numeroParcelas && a.numeroParcelas > 1 ? ` | ${a.numeroParcelas}x` : ''),
     createdAt:     `${a.date}T${a.start || '08:00'}:00`,
     updatedAt:     `${a.date}T${a.start || '08:00'}:00`,
-  };
+  }];
 }
 
 function fmtDate(dateStr: string): string {
@@ -162,7 +200,7 @@ export function useFinancial() {
 
   // Agendamentos pagos → accounts virtuais (com destino calculado)
   const apptAccounts = useMemo<Account[]>(() => {
-    return loadPaidAppointments().map(apptToAccount);
+    return loadPaidAppointments().flatMap(apptToAccount);
   }, []);
 
   // Todas as contas unificadas

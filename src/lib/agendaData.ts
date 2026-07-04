@@ -243,7 +243,17 @@ function mapConvToDb(c: any) {
   };
 }
 
-export async function listarConvenios() {
+// ─── Cache global de convênios ──────────────────────────────────────────
+// Compartilhado entre todas as telas (agenda, convênios, procedimentos, etc.)
+// para evitar múltiplas consultas ao Supabase. É invalidado automaticamente
+// sempre que um convênio é criado, atualizado ou excluído — assim novos
+// convênios aparecem imediatamente na agenda e convênios excluídos somem,
+// sem precisar recarregar a página.
+let _conveniosCache: any[] | null = null;
+
+export async function listarConvenios(force = false) {
+  if (!force && _conveniosCache) return _conveniosCache;
+
   const { data, error } = await supabase
     .from("convenios")
     .select("*")
@@ -251,9 +261,14 @@ export async function listarConvenios() {
 
   if (error) {
     console.error("Erro ao listar convênios:", error);
-    return [];
+    return _conveniosCache ?? [];
   }
-  return (data || []).map(mapConvFromDb);
+  _conveniosCache = (data || []).map(mapConvFromDb);
+  return _conveniosCache;
+}
+
+export function invalidateConveniosCache() {
+  _conveniosCache = null;
 }
 
 export async function criarConvenio(conv: any) {
@@ -267,6 +282,7 @@ export async function criarConvenio(conv: any) {
     console.error("Erro ao criar convênio:", error);
     throw error;
   }
+  invalidateConveniosCache();
   return mapConvFromDb(data);
 }
 
@@ -280,6 +296,7 @@ export async function atualizarConvenio(id: string, conv: any) {
     console.error("Erro ao atualizar convênio:", error);
     throw error;
   }
+  invalidateConveniosCache();
 }
 
 export async function excluirConvenio(id: string) {
@@ -288,6 +305,7 @@ export async function excluirConvenio(id: string) {
     console.error("Erro ao excluir convênio:", error);
     throw error;
   }
+  invalidateConveniosCache();
 }
 
 /* =========================================

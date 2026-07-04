@@ -76,20 +76,25 @@ const emptyForm = {
   observacao: "",                           // observação/anotações internas do profissional
 };
 
-function readConveniosNomesProf(): string[] {
+// Busca convênios e procedimentos reais (Supabase, cache compartilhado —
+// ver @/lib/agendaData). As chaves "nexaclinic_convenios_v2" e
+// "nexaclinic_procedimentos" no localStorage não são mais gravadas por
+// nenhuma tela (o cadastro migrou pro Supabase), então ler delas sempre
+// caía nos nomes fictícios de fallback ou em lista vazia.
+async function fetchConveniosNomesProf(): Promise<string[]> {
   try {
-    const saved = localStorage.getItem("nexaclinic_convenios_v2");
-    if (!saved) return ["Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
-    const list = JSON.parse(saved) as { name: string; ativo?: boolean }[];
-    return list.filter((c) => c.ativo !== false).map((c) => c.name);
-  } catch {
-    return ["Unimed", "Bradesco Saúde", "SulAmérica", "Amil"];
-  }
+    const { listarConvenios } = await import("@/lib/agendaData");
+    const list = await listarConvenios();
+    return (list as any[]).filter((c) => c.status !== "inativo").map((c) => c.name).filter(Boolean);
+  } catch { return []; }
 }
 
-function readProcedimentos(): { id: string; name: string }[] {
-  try { return JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]"); }
-  catch { return []; }
+async function fetchProcedimentosNomes(): Promise<{ id: string; name: string }[]> {
+  try {
+    const { listarProcedimentos } = await import("@/lib/agendaData");
+    const list = await listarProcedimentos();
+    return (list as any[]).filter((p) => p.status === "ativo").map((p) => ({ id: p.id, name: p.name }));
+  } catch { return []; }
 }
 
 function readProfessionals(): Professional[] {
@@ -241,8 +246,8 @@ function ProfissionaisPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<typeof emptyForm>(emptyForm);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [conveniosDisp, setConveniosDisp] = useState<string[]>(() => readConveniosNomesProf());
-  const [procsDisp, setProcsDisp] = useState<string[]>(() => readProcedimentos().map((p: any) => p.name));
+  const [conveniosDisp, setConveniosDisp] = useState<string[]>([]);
+  const [procsDisp, setProcsDisp] = useState<string[]>([]);
 
   useEffect(() => {
   async function carregar() {
@@ -256,11 +261,13 @@ function ProfissionaisPage() {
   }
 
   carregar();
+  fetchConveniosNomesProf().then(setConveniosDisp);
+  fetchProcedimentosNomes().then((procs) => setProcsDisp(procs.map((p) => p.name)));
 }, []);
   useEffect(() => {
     if (formOpen) {
-      setConveniosDisp(readConveniosNomesProf());
-      setProcsDisp(readProcedimentos().map((p: any) => p.name));
+      fetchConveniosNomesProf().then(setConveniosDisp);
+      fetchProcedimentosNomes().then((procs) => setProcsDisp(procs.map((p) => p.name)));
     }
   }, [formOpen]);
 

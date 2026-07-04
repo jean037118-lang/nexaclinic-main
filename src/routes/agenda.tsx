@@ -71,22 +71,25 @@ function todayStr() {
 }
 
 // ─── Cache global de convênios (Supabase) ──────────────────────────────────
-let _conveniosCache: any[] | null = null;
+// A cache em si (auto-invalidada em criarConvenio/atualizarConvenio/excluirConvenio)
+// vive em @/lib/agendaData, e é compartilhada por toda a aplicação — assim,
+// convênios criados/editados/excluídos na tela de Convênios aparecem
+// imediatamente aqui na Agenda, sem precisar recarregar a página.
+let _conveniosCacheLocal: any[] | null = null;
 async function getConveniosCache() {
-  if (_conveniosCache) return _conveniosCache;
   try {
     const { listarConvenios } = await import("@/lib/agendaData");
-    _conveniosCache = await listarConvenios();
-  } catch { _conveniosCache = []; }
-  return _conveniosCache ?? [];
+    _conveniosCacheLocal = await listarConvenios();
+  } catch { _conveniosCacheLocal = _conveniosCacheLocal ?? []; }
+  return _conveniosCacheLocal ?? [];
 }
-// Invalida cache quando convenios mudam
-export function invalidateConveniosCache() { _conveniosCache = null; }
+// Reexportado para compatibilidade com quem já importa daqui.
+export { invalidateConveniosCache } from "@/lib/agendaData";
 
 function isConvenioFaturavel(insuranceName: string): boolean {
   if (!insuranceName || insuranceName === "Particular") return false;
   try {
-    const list = _conveniosCache ?? JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
+    const list = _conveniosCacheLocal ?? JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
     const conv = list.find((c: any) => c.name?.toLowerCase().trim() === insuranceName?.toLowerCase().trim());
     return conv?.faturar === true;
   } catch { return false; }
@@ -94,12 +97,15 @@ function isConvenioFaturavel(insuranceName: string): boolean {
 
 function getConvenioId(insuranceName: string): string | null {
   try {
-    const list = _conveniosCache ?? JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
+    const list = _conveniosCacheLocal ?? JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
     return list.find((c: any) => c.name?.toLowerCase().trim() === insuranceName?.toLowerCase().trim())?.id ?? null;
   } catch { return null; }
 }
 
 // Hook: retorna lista de convênios completos do Supabase
+// Sempre busca (a função listarConvenios já usa cache em memória internamente,
+// e essa cache é invalidada automaticamente ao criar/editar/excluir convênio),
+// então reabrir o diálogo sempre reflete o cadastro mais atual.
 function useConveniosFull(open?: boolean): any[] {
   const [list, setList] = useState<any[]>([]);
   useEffect(() => {
@@ -147,6 +153,22 @@ function useProcedimentosList(open?: boolean): { name: string; tussCode?: string
   return list;
 }
 
+// Hook: retorna os procedimentos ativos completos (com valorParticular,
+// convenioValores, valorPorProfissional, tussCode etc.) — usado para
+// calcular o valor automático do procedimento (useProcedureValue).
+function useProcedimentosFull(open?: boolean): any[] {
+  const [list, setList] = useState<any[]>([]);
+  useEffect(() => {
+    if (!open && open !== undefined) return;
+    import("@/lib/agendaData").then(({ listarProcedimentos }) =>
+      listarProcedimentos().then((procs: any[]) =>
+        setList(procs.filter((p) => p.status === "ativo"))
+      )
+    ).catch(() => setList([]));
+  }, [open]);
+  return list;
+}
+
 export interface AppointmentExt extends Appointment {
   date: string;
   phone?: string;
@@ -165,6 +187,10 @@ export interface AppointmentExt extends Appointment {
   datasParcelas?: string[]; // datas previstas de recebimento
   mdrLancado?: boolean;     // taxa MDR já lançada em Contas a Pagar
   paid?: boolean;
+  // Pagamento dividido em 2 formas (ex: parte Dinheiro + parte Cartão).
+  // Usado pelo financeiro para lançar cada parte no destino correto
+  // (Caixa Central / Conta Bancária / Maquininha) em vez de um único destino.
+  paymentSplit?: { method: string; amount: number; cardBrand?: string; authCode?: string }[];
 
   cancelReason?: string;
   cancelledAt?: string;
@@ -366,18 +392,18 @@ function buscarValorNaTabela(
 //   3. Tabela do convênio selecionado (vínculo ID → TUSS → nome)   → Convênio
 //   4. Fallback legado: convenioValores[] no próprio procedimento   → Convênio
 //   5. Último fallback: valorParticular do cadastro                 → Convênio sem tabela
-function useProcedureValue(procedureName: string, insurance: string, professionalId?: string, planoId?: string): string {
+function useProcedureValue(procedureName: string, insurance: string, professionalId: string | undefined, planoId: string | undefined, procsFull: any[], conveniosFull: any[]): string {
   return useMemo(() => {
-    if (typeof window === "undefined" || !procedureName) return "";
+    if (!procedureName) return "";
     try {
       const normalize = (s: string) =>
         s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
-      const procs = JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
+      const procs = procsFull ?? [];
       const found = procs.find((p: any) => normalize(p.name) === normalize(procedureName));
       if (!found) return "";
 
-      const convenios = JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
+      const convenios = conveniosFull ?? [];
 
       if (insurance === "Particular") {
         if (professionalId && found.valorPorProfissional?.length) {
@@ -403,7 +429,7 @@ function useProcedureValue(procedureName: string, insurance: string, professiona
 
       return found.valorParticular ?? "";
     } catch { return ""; }
-  }, [procedureName, insurance, professionalId, planoId]);
+  }, [procedureName, insurance, professionalId, planoId, procsFull, conveniosFull]);
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────
@@ -812,14 +838,16 @@ function AgendaPage() {
   }
 
   // ─── Enviar agendamento direto ao Lote do mês (sem Controle de Guias) ────────
-  function handleEnviarFaturamento(apt: AppointmentExt) {
+  async function handleEnviarFaturamento(apt: AppointmentExt) {
     try {
-      // 1. Localiza o convênio cadastrado
-      const convsCad: any[] = JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]");
+      // 1. Localiza o convênio cadastrado (Supabase — cache compartilhado,
+      // sempre atualizado com criações/edições/exclusões feitas em Convênios)
+      const { listarConvenios } = await import("@/lib/agendaData");
+      const convsCad: any[] = await listarConvenios();
       const conv = convsCad.find((c: any) =>
         c.name?.toLowerCase().trim() === apt.insurance?.toLowerCase().trim()
       );
-      if (!conv) { toast.error("Convênio não encontrado no cadastro."); return; }
+      if (!conv) { toast.error("Convênio não encontrado no cadastro.", { description: `"${apt.insurance}" não está cadastrado em Convênios.` }); return; }
 
       // 2. Competência = mês do agendamento (YYYY-MM)
       const competencia = (apt.date ?? new Date().toISOString().slice(0, 10)).slice(0, 7);
@@ -905,9 +933,11 @@ function AgendaPage() {
   function registerPayment(
     id: string, amount: number, method: string, discount: number, amountOriginal: number,
     cardBrand?: string, authCode?: string,
-    taxaMDR?: number, numeroParcelas?: number, datasParcelas?: string[]
+    taxaMDR?: number, numeroParcelas?: number, datasParcelas?: string[],
+    paymentSplit?: { method: string; amount: number; cardBrand?: string; authCode?: string }[]
   ) {
-    const isCard = method === "Cartão de crédito" || method === "Cartão de débito";
+    const isCard = method === "Cartão de crédito" || method === "Cartão de débito"
+      || method.startsWith("Cartão de crédito ") || method.startsWith("Cartão de débito ");
     const valorTaxaMDR  = isCard && taxaMDR ? parseFloat((amount * taxaMDR / 100).toFixed(2)) : undefined;
     const valorLiquido  = isCard && taxaMDR ? parseFloat((amount - (valorTaxaMDR ?? 0)).toFixed(2)) : amount;
 
@@ -916,6 +946,7 @@ function AgendaPage() {
         a.id === id ? {
           ...a, status: "finalizado", paid: true, amount, amountOriginal, discount,
           paymentMethod: method,
+          paymentSplit: paymentSplit || undefined,
           cardBrand: cardBrand || undefined,
           authCode: authCode || undefined,
           taxaMDR: taxaMDR || undefined,
@@ -2527,8 +2558,8 @@ function AgendaPage() {
         open={payOpen}
         onOpenChange={setPayOpen}
         appointment={selected}
-        onConfirm={(amount, method, discount, amountOriginal, cardBrand, authCode) => {
-          if (selected) registerPayment(selected.id, amount, method, discount, amountOriginal, cardBrand, authCode);
+        onConfirm={(amount, method, discount, amountOriginal, cardBrand, authCode, taxaMDR, numeroParcelas, datasParcelas, paymentSplit) => {
+          if (selected) registerPayment(selected.id, amount, method, discount, amountOriginal, cardBrand, authCode, taxaMDR, numeroParcelas, datasParcelas, paymentSplit);
           setPayOpen(false);
         }}
       />
@@ -3176,26 +3207,37 @@ function NewAppointmentDialog({
   const [phone, setPhone] = useState("");
   const [cpf, setCpf] = useState("");
   const [duration, setDuration] = useState("30");
-  const [procedure, setProcedure] = useState("Consulta Clínica");
+  // Sem valor padrão fixo — evita mostrar um procedimento que talvez nunca
+  // tenha sido cadastrado. É preenchido com o 1º procedimento ativo real
+  // assim que a lista carrega (ver efeito abaixo).
+  const [procedure, setProcedure] = useState("");
   const [insurance, setInsurance] = useState("Particular");
   const [planoId, setPlanoId]     = useState("");
   const [procedureValueStr, setProcedureValueStr] = useState("");
   const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestions = usePatientSearch(query);
-  const autoValue = useProcedureValue(procedure, insurance, profId, planoId);
   const conveniosList = useConveniosNomes(open);
 
-  // Planos do convênio selecionado (usa cache Supabase)
+  // Convênios e procedimentos completos (Supabase — cache compartilhado)
   const conveniosFull = useConveniosFull(open);
+  const procedimentosFull = useProcedimentosFull(open);
+  const autoValue = useProcedureValue(procedure, insurance, profId, planoId, procedimentosFull, conveniosFull);
   const planosList = useMemo(() => {
     if (insurance === "Particular") return [];
-    const source = conveniosFull.length ? conveniosFull : (() => {
-      try { return JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]"); } catch { return []; }
-    })();
-    const conv = source.find((c: any) => c.name?.toLowerCase().trim() === insurance?.toLowerCase().trim());
+    const conv = conveniosFull.find((c: any) => c.name?.toLowerCase().trim() === insurance?.toLowerCase().trim());
     return (conv?.planos ?? []).filter((p: any) => p.ativo !== false);
-  }, [insurance, open, conveniosFull]);
+  }, [insurance, conveniosFull]);
+
+  // Assim que os procedimentos carregam, se nada foi selecionado ainda,
+  // pré-seleciona o 1º procedimento ativo real cadastrado.
+  useEffect(() => {
+    if (open && !procedure && procedimentosFull.length > 0) {
+      setProcedure(procedimentosFull[0].name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, procedimentosFull]);
+
 
   // ─── Aviso de retorno disponível ──────────────────────────────────────────
   // Calcula se o paciente selecionado tem um retorno disponível com este profissional
@@ -3204,7 +3246,7 @@ function NewAppointmentDialog({
     try {
       // Carrega appointments para o paciente
       const apts: any[] = JSON.parse(localStorage.getItem("nexaclinic_appointments_v3") ?? "[]");
-      const procs: any[] = JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
+      const procs: any[] = procedimentosFull;
       const profs: any[] = JSON.parse(localStorage.getItem("nexaclinic_professionals") ?? "[]");
 
       const prof = profs.find((p: any) => p.id === profId);
@@ -3254,7 +3296,7 @@ function NewAppointmentDialog({
       }
       return null;
     } catch { return null; }
-  }, [patientName, profId, date, procedure]);
+  }, [patientName, profId, date, procedure, procedimentosFull]);
 
   useEffect(() => {
     if (open) {
@@ -3272,41 +3314,15 @@ function NewAppointmentDialog({
       setPhone("");
       setCpf("");  // limpa CPF ao abrir novo agendamento
       setDuration("30");
-      setProcedure("Consulta Clínica");
+      // Não força mais "Consulta Clínica" — reseta e deixa o efeito de
+      // procedimentosFull escolher o 1º procedimento realmente cadastrado.
+      setProcedure("");
       setInsurance("Particular");
       setPlanoId("");
       setQuery("");
-      // popula o valor imediatamente com o autoValue já calculado para o estado inicial
-      // (evita corrida entre os dois useEffects quando procedure/insurance não mudam)
-      const initProcs = (() => {
-        try { return JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]"); }
-        catch { return []; }
-      })();
-      const initConvenios = (() => {
-        try { return JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") ?? "[]"); }
-        catch { return []; }
-      })();
-      const normalize = (s: string) =>
-        s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-      const found = initProcs.find((p: any) => normalize(p.name) === normalize("Consulta Clínica"));
-      if (found) {
-        // Prioridade 0: valor por profissional específico
-        const vprof = found.valorPorProfissional?.find((v: any) => v.professionalId === defaultProfessional);
-        if (vprof?.valor && parseFloat(String(vprof.valor).replace(",", ".")) > 0) {
-          setProcedureValueStr(String(vprof.valor));
-        } else {
-          const vp = found.valorParticular;
-          if (vp && parseFloat(String(vp).replace(",", ".")) > 0) {
-            setProcedureValueStr(String(vp));
-          } else {
-            const convPart = initConvenios.find((c: any) => normalize(c.name) === "particular");
-            const daTabela = buscarValorNaTabela(found, convPart ?? {}, normalize);
-            setProcedureValueStr(daTabela ?? vp ?? "");
-          }
-        }
-      } else {
-        setProcedureValueStr("");
-      }
+      setProcedureValueStr("");
+      // O valor é preenchido automaticamente pelo efeito abaixo assim que
+      // `autoValue` (useProcedureValue, com dados reais do Supabase) calcular.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultProfessional, defaultStart, defaultDate]);
@@ -3364,7 +3380,7 @@ function NewAppointmentDialog({
       : undefined;
     // Aviso: ao agendar consulta, verifica se paciente tem retorno disponível não usado
     try {
-      const procs: any[] = JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
+      const procs: any[] = procedimentosFull;
       const procAtual = procs.find((p: any) => p.name?.toLowerCase() === procedure?.toLowerCase());
       const isConsulta = procAtual?.tipoConsulta === true;
       if (isConsulta) {
@@ -3413,9 +3429,8 @@ function NewAppointmentDialog({
     onOpenChange(false);
   }
 
-  // Carrega lista de procedimentos do cadastro
-  const procedimentosData = useProcedimentosList(open);
-  const proceduresList = procedimentosData.map((p) => p.name);
+  // Lista de nomes de procedimentos para o combobox (reaproveita procedimentosFull já carregado)
+  const proceduresList = procedimentosFull.map((p) => p.name);
   // Busca local no combobox
   const [procSearch, setProcSearch] = useState("");
   const [convSearch, setConvSearch] = useState("");
@@ -3746,7 +3761,7 @@ function PaymentDialog({ open, onOpenChange, appointment, onConfirm }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   appointment: AppointmentExt | null;
-  onConfirm: (amount: number, method: string, discount: number, amountOriginal: number, cardBrand?: string, authCode?: string, taxaMDR?: number, numeroParcelas?: number, datasParcelas?: string[]) => void;
+  onConfirm: (amount: number, method: string, discount: number, amountOriginal: number, cardBrand?: string, authCode?: string, taxaMDR?: number, numeroParcelas?: number, datasParcelas?: string[], paymentSplit?: { method: string; amount: number; cardBrand?: string; authCode?: string }[]) => void;
 }) {
   const [amountStr, setAmountStr]     = useState("");
   const [method, setMethod]           = useState(PAYMENT_METHODS[0]);
@@ -3825,7 +3840,13 @@ function PaymentDialog({ open, onOpenChange, appointment, onConfirm }: {
       const brandCombinado = [isCard ? cardBrand : "", isCard2 ? cardBrand2 : ""].filter(Boolean).join(" + ") || undefined;
       const authCombinado = [isCard ? authCode : "", isCard2 ? authCode2 : ""].filter(Boolean).join(" / ") || undefined;
       const datas = isCredito && numeroParcelas > 1 ? calcDatasParcelas(numeroParcelas) : undefined;
-      onConfirm(amountFinal, methodCombinado, discount, amountOriginal, brandCombinado, authCombinado, isCard ? taxaMDR : undefined, isCard ? numeroParcelas : undefined, datas);
+      // Detalha cada forma separadamente — usado no financeiro para lançar
+      // cada parte no destino certo (Caixa Central / Conta Bancária / Maquininha)
+      const paymentSplit = [
+        { method, amount: totalDuplo, cardBrand: isCard ? cardBrand : undefined, authCode: isCard ? authCode : undefined },
+        { method: method2, amount: amount2, cardBrand: isCard2 ? cardBrand2 : undefined, authCode: isCard2 ? authCode2 : undefined },
+      ];
+      onConfirm(amountFinal, methodCombinado, discount, amountOriginal, brandCombinado, authCombinado, isCard ? taxaMDR : undefined, isCard ? numeroParcelas : undefined, datas, paymentSplit);
     } else {
       const datas = isCredito && numeroParcelas > 1 ? calcDatasParcelas(numeroParcelas) : undefined;
       onConfirm(amountFinal, method, discount, amountOriginal, isCard ? cardBrand : undefined, isCard ? authCode : undefined, isCard ? taxaMDR : undefined, isCard ? numeroParcelas : undefined, datas);
@@ -4351,8 +4372,11 @@ function EditAppointmentDialog({
   const [phone, setPhone] = useState("");
   const [userEditedValue, setUserEditedValue] = useState(false);
 
+  // Convênios e procedimentos completos (Supabase — cache compartilhado)
+  const conveniosFull = useConveniosFull(open);
+  const procedimentosFull = useProcedimentosFull(open);
   // Hook que busca o valor automático do procedimento (igual ao dialog de criação)
-  const autoValue = useProcedureValue(procedure, insurance, profId, undefined);
+  const autoValue = useProcedureValue(procedure, insurance, profId, undefined, procedimentosFull, conveniosFull);
 
   // Preenche os campos quando o dialog abre
   useEffect(() => {
@@ -4377,14 +4401,13 @@ function EditAppointmentDialog({
     }
   }, [autoValue, userEditedValue]);
 
-  const proceduresList = useMemo(() => {
-    try {
-      const procs = JSON.parse(localStorage.getItem("nexaclinic_procedimentos") ?? "[]");
-      return procs.filter((p: any) => p.status === "ativo").map((p: any) => p.name);
-    } catch { return ["Consulta Clínica", "Retorno"]; }
-  }, [open]);
+  const proceduresList = procedimentosFull.map((p) => p.name);
 
   const conveniosList = useConveniosNomes(open);
+  const [procSearch, setProcSearch] = useState("");
+  const [convSearch, setConvSearch] = useState("");
+  const filteredProcs = proceduresList.filter((n) => n.toLowerCase().includes(procSearch.toLowerCase()));
+  const filteredConvs = conveniosList.filter((n) => n.toLowerCase().includes(convSearch.toLowerCase()));
 
   function submit() {
     if (!date) { toast.error("Informe a data"); return; }
@@ -4468,15 +4491,37 @@ function EditAppointmentDialog({
             </div>
             <div>
               <Label className="text-xs">Procedimento</Label>
-              <select
-                value={procedure}
-                onChange={(e) => setProcedure(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400 bg-white"
-              >
-                {proceduresList.map((p: string) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
+                    <span className={procedure ? "text-foreground" : "text-muted-foreground"}>{procedure || "Selecione..."}</span>
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="start">
+                  <div className="p-2 border-b">
+                    <input
+                      className="w-full text-sm px-2 py-1 outline-none bg-transparent placeholder:text-muted-foreground"
+                      placeholder="Buscar procedimento..."
+                      value={procSearch}
+                      onChange={(e) => setProcSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {filteredProcs.length === 0 && (
+                      <p className="text-xs text-muted-foreground p-3 text-center">Nenhum resultado</p>
+                    )}
+                    {filteredProcs.map((name) => (
+                      <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${procedure === name ? "font-semibold text-primary" : ""}`}
+                        onClick={() => { setProcedure(name); setProcSearch(""); }}>
+                        {procedure === name && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -4484,15 +4529,37 @@ function EditAppointmentDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Convênio</Label>
-              <select
-                value={insurance}
-                onChange={(e) => setInsurance(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400 bg-white"
-              >
-                {conveniosList.map((c: string) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
+                    <span className={insurance ? "text-foreground" : "text-muted-foreground"}>{insurance || "Selecione..."}</span>
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="start">
+                  <div className="p-2 border-b">
+                    <input
+                      className="w-full text-sm px-2 py-1 outline-none bg-transparent placeholder:text-muted-foreground"
+                      placeholder="Buscar convênio..."
+                      value={convSearch}
+                      onChange={(e) => setConvSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {filteredConvs.length === 0 && (
+                      <p className="text-xs text-muted-foreground p-3 text-center">Nenhum resultado</p>
+                    )}
+                    {filteredConvs.map((name) => (
+                      <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${insurance === name ? "font-semibold text-primary" : ""}`}
+                        onClick={() => { setInsurance(name); setConvSearch(""); }}>
+                        {insurance === name && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
             <div>
               <Label className="text-xs">Valor (R$)</Label>

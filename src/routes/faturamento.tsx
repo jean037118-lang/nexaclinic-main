@@ -62,17 +62,18 @@ const faturaStatusCfg: Record<FaturaStatus, { label: string; cls: string }> = {
   recurso:  { label: 'Recurso',  cls: 'border-orange-200 bg-orange-50 text-orange-700' },
 };
 
-// Convênios disponíveis (lidos do localStorage)
-function getConvenios() {
+// Convênios disponíveis — busca real no Supabase (cache compartilhado,
+// auto-invalidado ao criar/editar/excluir — ver @/lib/agendaData).
+// Antes lia a chave "nexaclinic_convenios" do localStorage, que nenhuma
+// tela grava (o cadastro é 100% Supabase), então sempre caía no fallback
+// com convênios fictícios ("Unimed", "Bradesco Saúde" etc.).
+async function fetchConveniosReal(): Promise<{ id: string; name: string; ansCode?: string; faturar?: boolean }[]> {
   try {
-    const data = localStorage.getItem('nexaclinic_convenios');
-    if (!data) return [
-      { id: 'conv1', name: 'Unimed', ansCode: '305-2' },
-      { id: 'conv2', name: 'Bradesco Saúde', ansCode: '005-4' },
-      { id: 'conv3', name: 'SulAmérica', ansCode: '006-2' },
-      { id: 'conv4', name: 'Amil', ansCode: '326-3' },
-    ];
-    return JSON.parse(data).filter((c: any) => c.status === 'ativo');
+    const { listarConvenios } = await import("@/lib/agendaData");
+    const list = await listarConvenios();
+    return (list as any[])
+      .filter((c) => c.status === "ativo")
+      .map((c) => ({ id: c.id, name: c.name, ansCode: c.ansCode, faturar: c.faturar === true }));
   } catch { return []; }
 }
 
@@ -111,7 +112,8 @@ function FaturamentoPage() {
 
   const [tab, setTab] = useState<'lotes' | 'faturas'>('lotes');
   const [q, setQ] = useState('');
-  const convenios = getConvenios();
+  const [convenios, setConvenios] = useState<{ id: string; name: string; ansCode?: string; faturar?: boolean }[]>([]);
+  useEffect(() => { fetchConveniosReal().then(setConvenios); }, []);
 
   // ─── Controle de Guias ────────────────────────────────────────────────────
   // Guias = atendimentos vindos da agenda (nexaclinic_appointments_v3)
@@ -132,14 +134,14 @@ function FaturamentoPage() {
   const [profissionais, setProfissionais] = useState<any[]>([]);
 
   useEffect(() => {
-    function carregarGuias() {
+    async function carregarGuias() {
       try {
         const raw = localStorage.getItem('nexaclinic_appointments_v3') ?? '[]';
         const apts = JSON.parse(raw) as any[];
 
-        // Lê convênios cadastrados para checar flag "faturar"
-        const convRaw = localStorage.getItem('nexaclinic_convenios_v2') ?? localStorage.getItem('nexaclinic_convenios') ?? '[]';
-        const convsCad: any[] = JSON.parse(convRaw);
+        // Lê convênios cadastrados (Supabase) para checar flag "faturar"
+        const { listarConvenios } = await import('@/lib/agendaData');
+        const convsCad: any[] = await listarConvenios();
 
         // Monta set com nome E id dos convênios marcados como faturar:true
         const convenioFaturaSet = new Set<string>();
@@ -321,6 +323,13 @@ function FaturamentoPage() {
   const [faturaDelete, setFaturaDelete] = useState<string | null>(null);
   const [faturaDetail, setFaturaDetail] = useState<FaturaConvenio | null>(null);
   const [pagamentoFatura, setPagamentoFatura] = useState<FaturaConvenio | null>(null);
+
+  // Recarrega convênios sempre que um dos diálogos que usam a lista abre —
+  // garante que convênios recém-cadastrados apareçam sem precisar recarregar a página.
+  useEffect(() => {
+    if (loteForm || faturaForm) fetchConveniosReal().then(setConvenios);
+  }, [loteForm, faturaForm]);
+
   const [envioFatura, setEnvioFatura] = useState<FaturaConvenio | null>(null);
 
   const emptyFatura = {
@@ -1155,7 +1164,7 @@ function FaturamentoPage() {
 
                         const pending = apts.filter((a: any) => {
                           // Verifica se o convênio do agendamento está marcado como "Faturar"
-                          const convsCad: any[] = (() => { try { return JSON.parse(localStorage.getItem('nexaclinic_convenios_v2') ?? localStorage.getItem('nexaclinic_convenios') ?? '[]'); } catch { return []; } })();
+                          const convsCad: any[] = convenios; // cadastro real (Supabase), já carregado no estado do componente
                           const temFaturarConf = convsCad.some((c: any) => c.faturar === true);
                           if (temFaturarConf) {
                             const conv = convsCad.find((c: any) =>
@@ -1824,7 +1833,7 @@ function FaturamentoPage() {
 
                         const pending = apts.filter((a: any) => {
                           // Verifica se o convênio do agendamento está marcado como "Faturar"
-                          const convsCad: any[] = (() => { try { return JSON.parse(localStorage.getItem('nexaclinic_convenios_v2') ?? localStorage.getItem('nexaclinic_convenios') ?? '[]'); } catch { return []; } })();
+                          const convsCad: any[] = convenios; // cadastro real (Supabase), já carregado no estado do componente
                           const temFaturarConf = convsCad.some((c: any) => c.faturar === true);
                           if (temFaturarConf) {
                             const conv = convsCad.find((c: any) =>

@@ -1,7 +1,7 @@
 // useBilling — hook para o módulo de Faturamento de convênios
 
 import { useState, useEffect, useCallback } from 'react';
-import { billingStorage } from '@/lib/financial/billing-storage';
+import { billingStorage, initBillingStorage, billingStorageEstaCarregado } from '@/lib/financial/billing-storage';
 import type {
   LoteFaturamento,
   FaturaConvenio,
@@ -24,7 +24,17 @@ export function useBilling() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    // Popula o cache em memória a partir do Supabase antes de ler —
+    // sem isso, getLotes()/getFaturas() sempre retornavam vazio após
+    // um recarregamento de página, pois o cache nunca era inicializado.
+    if (billingStorageEstaCarregado()) {
+      reload();
+    } else {
+      setLoading(true);
+      initBillingStorage().finally(reload);
+    }
+  }, [reload]);
 
   // ─── Lotes ─────────────────────────────────────────────────────────────────
   function createLote(input: CreateLoteInput): LoteFaturamento {

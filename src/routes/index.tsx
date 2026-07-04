@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   CalendarCheck, Clock3, DollarSign, UserPlus, TrendingUp, TrendingDown,
   Activity, Users, ArrowRight, CheckCircle2, AlertCircle, Calendar,
@@ -81,8 +81,9 @@ function Dashboard() {
   const profs: any[] = useMemo(() => {
     try { return JSON.parse(localStorage.getItem("nexaclinic_professionals") || "[]"); } catch { return []; }
   }, []);
-  const conveniosCad: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_convenios_v2") || "[]"); } catch { return []; }
+  const [conveniosCad, setConveniosCad] = useState<any[]>([]);
+  useEffect(() => {
+    import("@/lib/agendaData").then(({ listarConvenios }) => listarConvenios().then(setConveniosCad)).catch(() => setConveniosCad([]));
   }, []);
   // Convênios marcados como "Faturar convênio" — não entram como pendentes de pagamento
   const conveniosFaturados = useMemo(() => new Set(conveniosCad.filter((c: any) => c.faturar).map((c: any) => c.name)), [conveniosCad]);

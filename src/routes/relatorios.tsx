@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Calendar, DollarSign, TrendingUp, TrendingDown,
   FileDown, FileSpreadsheet, Activity, CheckCircle2, XCircle,
@@ -123,7 +123,12 @@ function RelatoriosPage() {
   const allApts: Apt[] = useMemo(()=>{ try{ return JSON.parse(localStorage.getItem("nexaclinic_appointments_v3")||"[]"); }catch{ return []; } },[]);
   const profs: Prof[]  = useMemo(()=>{ try{ return JSON.parse(localStorage.getItem("nexaclinic_professionals")||"[]"); }catch{ return []; } },[]);
   const pats           = useMemo(()=>{ try{ return JSON.parse(localStorage.getItem("nexaclinic_patients_v3")||"[]"); }catch{ return []; } },[]);
-  const conveniosCad   = useMemo(()=>{ try{ return JSON.parse(localStorage.getItem("nexaclinic_convenios_v2")||"[]") as {name:string;faturar?:boolean}[]; }catch{ return []; } },[]);
+  const [conveniosCad, setConveniosCad] = useState<{name:string;faturar?:boolean}[]>([]);
+  useEffect(() => {
+    import("@/lib/agendaData").then(({ listarConvenios }) =>
+      listarConvenios().then((list: any[]) => setConveniosCad(list.map((c) => ({ name: c.name, faturar: c.faturar === true }))))
+    ).catch(() => setConveniosCad([]));
+  }, []);
   const conveniosFaturados = useMemo(()=>new Set(conveniosCad.filter(c=>c.faturar).map(c=>c.name)),[conveniosCad]);
 
   const profOpts = useMemo(()=>profs.map(p=>({v:p.id,l:p.name})),[profs]);

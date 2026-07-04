@@ -69,17 +69,12 @@ function fmtDate(iso: string) {
   return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ─── Convênios do localStorage ────────────────────────────────────────────────
-function getConvenios() {
+// ─── Convênios (Supabase — cache compartilhado, ver @/lib/agendaData) ──────────
+async function fetchConveniosTISS(): Promise<{ id: string; name: string; ansCode?: string }[]> {
   try {
-    const raw = localStorage.getItem('nexaclinic_convenios');
-    if (!raw) return [
-      { id: 'c1', name: 'Unimed',         ansCode: '305-2' },
-      { id: 'c2', name: 'Bradesco Saúde', ansCode: '005-4' },
-      { id: 'c3', name: 'SulAmérica',     ansCode: '006-2' },
-      { id: 'c4', name: 'Amil',           ansCode: '326-3' },
-    ];
-    return JSON.parse(raw).filter((c: any) => c.status === 'ativo');
+    const { listarConvenios } = await import('@/lib/agendaData');
+    const list = await listarConvenios();
+    return (list as any[]).filter((c) => c.status === 'ativo').map((c) => ({ id: c.id, name: c.name, ansCode: c.ansCode }));
   } catch { return []; }
 }
 
@@ -94,7 +89,8 @@ function TISSPage() {
 
   const [tab, setTab] = useState<'lotes' | 'protocolos' | 'configuracao'>('lotes');
   const [q, setQ] = useState('');
-  const convenios = getConvenios();
+  const [convenios, setConvenios] = useState<{ id: string; name: string; ansCode?: string }[]>([]);
+  useEffect(() => { fetchConveniosTISS().then(setConvenios); }, []);
 
   // ─── Dialogs state ────────────────────────────────────────────────────────
   const [novoLoteOpen, setNovoLoteOpen] = useState(false);

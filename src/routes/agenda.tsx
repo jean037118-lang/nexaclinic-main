@@ -1,6 +1,6 @@
 'use client';
 import { createFileRoute } from "@tanstack/react-router";
-import { billingStorage } from "@/lib/billing-storage";
+import { billingStorage, initBillingStorage, billingStorageEstaCarregado } from "@/lib/financial/billing-storage";
 import { eAdmin, registrarAuditoria } from "@/lib/auth";
 import {
   listarProfissionais,
@@ -438,6 +438,16 @@ function useProcedureValue(procedureName: string, insurance: string, professiona
 function AgendaPage() {
   const [view, setView] = useState<"day" | "week" | "month">("day");
 
+  // Popula o cache em memória de lotes/faturas (Supabase) usado por
+  // "Enviar p/ Faturamento" e pelo cancelamento de agendamento já faturado.
+  // Sem isso, o cache começava sempre vazio nesta tela (só era populado
+  // quando a pessoa visitava a tela de Faturamento antes).
+  useEffect(() => {
+    if (!billingStorageEstaCarregado()) {
+      initBillingStorage().catch((e) => console.error("Erro ao inicializar billing storage:", e));
+    }
+  }, []);
+
   // Carrega profissionais do Supabase (com fallback para o cache local
   // enquanto a busca não termina, para evitar tela vazia no primeiro render)
   const [allProfessionals, setAllProfessionals] = useState(() => {
@@ -842,6 +852,13 @@ function AgendaPage() {
   // ─── Enviar agendamento direto ao Lote do mês (sem Controle de Guias) ────────
   async function handleEnviarFaturamento(apt: AppointmentExt) {
     try {
+      // 0. Garante que o cache de lotes (Supabase) já foi carregado —
+      // evita criar um lote duplicado caso o usuário clique antes do
+      // carregamento inicial (useEffect) terminar.
+      if (!billingStorageEstaCarregado()) {
+        await initBillingStorage();
+      }
+
       // 1. Localiza o convênio cadastrado (Supabase — cache compartilhado,
       // sempre atualizado com criações/edições/exclusões feitas em Convênios)
       const { listarConvenios } = await import("@/lib/agendaData");
@@ -850,6 +867,12 @@ function AgendaPage() {
         c.name?.toLowerCase().trim() === apt.insurance?.toLowerCase().trim()
       );
       if (!conv) { toast.error("Convênio não encontrado no cadastro.", { description: `"${apt.insurance}" não está cadastrado em Convênios.` }); return; }
+      if (conv.faturar !== true) {
+        toast.error("Este convênio não está marcado para faturamento.", {
+          description: `Ative a opção "Faturar" no cadastro do convênio "${conv.name}" para poder enviá-lo automaticamente para um lote.`,
+        });
+        return;
+      }
 
       // 2. Competência = mês do agendamento (YYYY-MM)
       const competencia = (apt.date ?? new Date().toISOString().slice(0, 10)).slice(0, 7);

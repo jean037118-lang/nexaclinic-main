@@ -3456,6 +3456,8 @@ function NewAppointmentDialog({
   // Busca local no combobox
   const [procSearch, setProcSearch] = useState("");
   const [convSearch, setConvSearch] = useState("");
+  const [procPopoverOpen, setProcPopoverOpen] = useState(false);
+  const [convPopoverOpen, setConvPopoverOpen] = useState(false);
   const filteredProcs = proceduresList.filter((n) => n.toLowerCase().includes(procSearch.toLowerCase()));
   const filteredConvs = conveniosList.filter((n) => n.toLowerCase().includes(convSearch.toLowerCase()));
 
@@ -3598,7 +3600,7 @@ function NewAppointmentDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Procedimento</Label>
-              <Popover>
+              <Popover open={procPopoverOpen} onOpenChange={setProcPopoverOpen}>
                 <PopoverTrigger asChild>
                   <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
                     <span className={procedure ? "text-foreground" : "text-muted-foreground"}>{procedure || "Selecione..."}</span>
@@ -3621,7 +3623,7 @@ function NewAppointmentDialog({
                     )}
                     {filteredProcs.map((name) => (
                       <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${procedure === name ? "font-semibold text-primary" : ""}`}
-                        onClick={() => { setProcedure(name); setProcSearch(""); }}>
+                        onClick={() => { setProcedure(name); setProcSearch(""); setProcPopoverOpen(false); }}>
                         {procedure === name && <Check className="h-3.5 w-3.5 shrink-0" />}
                         {name}
                       </button>
@@ -3632,7 +3634,7 @@ function NewAppointmentDialog({
             </div>
             <div>
               <Label className="text-xs">Convênio</Label>
-              <Popover>
+              <Popover open={convPopoverOpen} onOpenChange={setConvPopoverOpen}>
                 <PopoverTrigger asChild>
                   <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
                     <span className={insurance ? "text-foreground" : "text-muted-foreground"}>{insurance || "Selecione..."}</span>
@@ -3655,7 +3657,7 @@ function NewAppointmentDialog({
                     )}
                     {filteredConvs.map((name) => (
                       <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${insurance === name ? "font-semibold text-primary" : ""}`}
-                        onClick={() => { setInsurance(name); setPlanoId(""); setConvSearch(""); }}>
+                        onClick={() => { setInsurance(name); setPlanoId(""); setConvSearch(""); setConvPopoverOpen(false); }}>
                         {insurance === name && <Check className="h-3.5 w-3.5 shrink-0" />}
                         {name}
                       </button>
@@ -4428,6 +4430,8 @@ function EditAppointmentDialog({
   const conveniosList = useConveniosNomes(open);
   const [procSearch, setProcSearch] = useState("");
   const [convSearch, setConvSearch] = useState("");
+  const [procPopoverOpen, setProcPopoverOpen] = useState(false);
+  const [convPopoverOpen, setConvPopoverOpen] = useState(false);
   const filteredProcs = proceduresList.filter((n) => n.toLowerCase().includes(procSearch.toLowerCase()));
   const filteredConvs = conveniosList.filter((n) => n.toLowerCase().includes(convSearch.toLowerCase()));
 
@@ -4513,7 +4517,7 @@ function EditAppointmentDialog({
             </div>
             <div>
               <Label className="text-xs">Procedimento</Label>
-              <Popover>
+              <Popover open={procPopoverOpen} onOpenChange={setProcPopoverOpen}>
                 <PopoverTrigger asChild>
                   <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
                     <span className={procedure ? "text-foreground" : "text-muted-foreground"}>{procedure || "Selecione..."}</span>
@@ -4536,7 +4540,7 @@ function EditAppointmentDialog({
                     )}
                     {filteredProcs.map((name) => (
                       <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${procedure === name ? "font-semibold text-primary" : ""}`}
-                        onClick={() => { setProcedure(name); setProcSearch(""); }}>
+                        onClick={() => { setProcedure(name); setProcSearch(""); setProcPopoverOpen(false); }}>
                         {procedure === name && <Check className="h-3.5 w-3.5 shrink-0" />}
                         {name}
                       </button>
@@ -4551,7 +4555,7 @@ function EditAppointmentDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Convênio</Label>
-              <Popover>
+              <Popover open={convPopoverOpen} onOpenChange={setConvPopoverOpen}>
                 <PopoverTrigger asChild>
                   <button className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 h-10">
                     <span className={insurance ? "text-foreground" : "text-muted-foreground"}>{insurance || "Selecione..."}</span>
@@ -4574,7 +4578,7 @@ function EditAppointmentDialog({
                     )}
                     {filteredConvs.map((name) => (
                       <button key={name} className={`w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center gap-2 ${insurance === name ? "font-semibold text-primary" : ""}`}
-                        onClick={() => { setInsurance(name); setConvSearch(""); }}>
+                        onClick={() => { setInsurance(name); setConvSearch(""); setConvPopoverOpen(false); }}>
                         {insurance === name && <Check className="h-3.5 w-3.5 shrink-0" />}
                         {name}
                       </button>

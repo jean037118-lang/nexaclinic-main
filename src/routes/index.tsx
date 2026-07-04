@@ -132,10 +132,22 @@ function Dashboard() {
 
   // ── Convênios do mês ──────────────────────────────────────────────────────
   const convData = useMemo(() => {
-    const m: Record<string, number> = {};
-    mesApts.forEach((a: any) => { const k = a.insurance || "Particular"; m[k] = (m[k] || 0) + 1; });
-    return Object.entries(m).map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, 5);
-  }, [mesApts]);
+    const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    // Mapa normalizado → nome de exibição "oficial" (usa a grafia cadastrada
+    // em Convênios quando existir, para não duplicar "Particular"/"PARTICULAR").
+    const nomeOficial: Record<string, string> = {};
+    conveniosCad.forEach((c: any) => { if (c.name) nomeOficial[normalize(c.name)] = c.name; });
+
+    const m: Record<string, { label: string; total: number }> = {};
+    mesApts.forEach((a: any) => {
+      const raw = a.insurance || "Particular";
+      const key = normalize(raw);
+      const label = nomeOficial[key] ?? raw;
+      if (!m[key]) m[key] = { label, total: 0 };
+      m[key].total += 1;
+    });
+    return Object.values(m).map(({ label, total }) => ({ name: label, total })).sort((a, b) => b.total - a.total).slice(0, 5);
+  }, [mesApts, conveniosCad]);
 
   // ── Taxa de ocupação por profissional ─────────────────────────────────────
   const ocupacao = useMemo(() => {

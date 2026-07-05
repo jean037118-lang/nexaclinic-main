@@ -11,6 +11,8 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis, Cell,
 } from "recharts";
 import { getUsuarioAtual } from "@/lib/auth";
+import { patientStore } from "@/lib/patient-store";
+import { listarAgendamentos, listarProfissionais } from "@/lib/agendaData";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -72,14 +74,20 @@ function Dashboard() {
   const nomeUsuario = usuario?.nome?.split(" ")[0] ?? "Doutor(a)";
 
   // ── Dados brutos ─────────────────────────────────────────────────────────
-  const allApts: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_appointments_v3") || "[]"); } catch { return []; }
-  }, []);
-  const patients: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_patients_v3") || "[]"); } catch { return []; }
-  }, []);
-  const profs: any[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem("nexaclinic_professionals") || "[]"); } catch { return []; }
+  // (antes lia de espelhos em localStorage que só eram populados como
+  // efeito colateral de abrir Agenda/Faturamento — por isso o dashboard
+  // podia aparecer zerado/desatualizado. Agora busca direto da fonte real.)
+  const [allApts, setAllApts] = useState<any[]>([]);
+  const [profs, setProfs] = useState<any[]>([]);
+  const [patients, setPatients] = useState<any[]>(() => patientStore.getAll());
+  useEffect(() => {
+    listarAgendamentos().then(setAllApts);
+    listarProfissionais().then(setProfs);
+    setPatients(patientStore.getAll());
+    if (!patientStore.isLoaded()) {
+      patientStore.refresh().then(setPatients);
+    }
+    return patientStore.subscribe(() => setPatients(patientStore.getAll()));
   }, []);
   const [conveniosCad, setConveniosCad] = useState<any[]>([]);
   useEffect(() => {
@@ -89,7 +97,10 @@ function Dashboard() {
   const conveniosFaturados = useMemo(() => new Set(conveniosCad.filter((c: any) => c.faturar).map((c: any) => c.name)), [conveniosCad]);
 
   const hoje      = new Date();
-  const todayStr  = hoje.toISOString().split("T")[0];
+  // Data local, não toISOString/UTC — em UTC-3 o toISOString já vira o dia
+  // seguinte a partir das 21h no horário do Brasil, fazendo os KPIs "de hoje"
+  // ficarem errados no fim do dia.
+  const todayStr  = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-${String(hoje.getDate()).padStart(2, "0")}`;
   const iniMes    = startOfMonth(hoje);
   const fimMes    = endOfMonth(hoje);
   const iniAnt    = startOfMonth(new Date(hoje.getFullYear(), hoje.getMonth() - 1));

@@ -22,6 +22,7 @@ import {
 } from "@/lib/agendaData";
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { patientStore } from "@/lib/patient-store";
+import { gerarFichaClinicaPDF } from "@/lib/fichaClinica";
 import { sendConfirmacaoAgendamento, runDailyReminders } from "@/lib/whatsapp";
 import {
   ChevronLeft, ChevronRight, Filter, Plus, CheckCircle2,
@@ -30,7 +31,7 @@ import {
   UserCheck, Sparkles, Microscope, SendHorizonal, Layers, AlertTriangle,
   TrendingUp, Activity, RefreshCw, Stethoscope,
   ListOrdered, Lock, BellRing, CheckCheck, Trash2, Coffee, Menu, Pencil,
-  ChevronsUpDown, Check,
+  ChevronsUpDown, Check, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -952,6 +953,34 @@ function AgendaPage() {
     } catch (err) {
       console.error("Erro ao enviar para faturamento:", err);
       toast.error("Erro ao enviar para faturamento. Verifique o console.");
+    }
+  }
+
+  async function handleImprimirFicha(apt: AppointmentExt) {
+    try {
+      const pacientes = patientStore.getAll();
+      const paciente =
+        ((apt as any).patientId && pacientes.find((p: any) => p.id === (apt as any).patientId)) ||
+        pacientes.find((p: any) => p.name?.toLowerCase().trim() === apt.patientName?.toLowerCase().trim()) ||
+        null;
+      const prof = allProfessionals.find((p: any) => p.id === apt.professionalId);
+
+      await gerarFichaClinicaPDF({
+        appointment: {
+          patientName: apt.patientName,
+          date: apt.date,
+          start: apt.start,
+          durationMin: apt.durationMin,
+          procedure: apt.procedure,
+          insurance: apt.insurance,
+          phone: apt.phone,
+        },
+        patient: paciente,
+        professionalName: prof?.name,
+      });
+    } catch (err) {
+      console.error("Erro ao gerar ficha clínica:", err);
+      toast.error("Erro ao gerar a ficha clínica. Verifique o console.");
     }
   }
 
@@ -2523,6 +2552,17 @@ function AgendaPage() {
                     )}
                   </div>
                 )}
+
+                <div className="flex border-t border-border pt-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => handleImprimirFicha(selected)}
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Imprimir Ficha Clínica
+                  </Button>
+                </div>
               </div>
             </>
           )}

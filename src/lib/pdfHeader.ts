@@ -10,8 +10,7 @@
  */
 
 import jsPDF from "jspdf";
-
-const EMPRESA_KEY = "nexaclinic_empresa";
+import { getEmpresaDb } from "@/lib/agendaData";
 
 interface EmpresaData {
   nomeFantasia?: string;
@@ -19,9 +18,16 @@ interface EmpresaData {
   logo?: string; // base64 ou URL
 }
 
-function getEmpresa(): EmpresaData {
+// Cache simples em memória: evita bater no Supabase toda vez que um PDF é
+// gerado numa mesma sessão (dados da empresa mudam raramente).
+let empresaCache: EmpresaData | null = null;
+
+async function getEmpresa(): Promise<EmpresaData> {
+  if (empresaCache) return empresaCache;
   try {
-    return JSON.parse(localStorage.getItem(EMPRESA_KEY) ?? "{}");
+    const dados = await getEmpresaDb();
+    empresaCache = dados ?? {};
+    return empresaCache;
   } catch {
     return {};
   }
@@ -37,7 +43,7 @@ export async function drawPdfHeader(
   subtitulo?: string,
   orientation: "portrait" | "landscape" = "portrait"
 ): Promise<number> {
-  const empresa = getEmpresa();
+  const empresa = await getEmpresa();
   const pageW = doc.internal.pageSize.getWidth();
   const dark:  [number, number, number] = [15,  23,  42];
   const white: [number, number, number] = [255, 255, 255];

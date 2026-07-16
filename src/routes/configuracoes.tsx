@@ -72,28 +72,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { supabase } from "@/lib/supabase";
-
-// ─── Empresa: funções Supabase ────────────────────────────────────────────────
-// A tabela "configuracoes_empresa" deve ter uma única linha com id fixo
-const EMPRESA_ROW_ID = "clinica";
-
-async function getEmpresaDb() {
-  const { data, error } = await supabase
-    .from("configuracoes_empresa")
-    .select("*")
-    .eq("id", EMPRESA_ROW_ID)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
-async function salvarEmpresaDb(dados: Record<string, unknown>) {
-  const { error } = await supabase
-    .from("configuracoes_empresa")
-    .upsert({ ...dados, id: EMPRESA_ROW_ID }, { onConflict: "id" });
-  if (error) throw error;
-}
+import { getEmpresaDb, salvarEmpresaDb } from "@/lib/agendaData";
 
 // ─── Route ────────────────────────────────────────────────────────────────────
 export const Route = createFileRoute("/configuracoes")({
